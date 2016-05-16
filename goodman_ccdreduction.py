@@ -1,53 +1,129 @@
 # __author__ = 'davidsanm'
 
 import os
+import glob
 import numpy as np
-from astropy import units as u, log
+from astropy.io import fits
+from astropy import log
+from astropy import units as u
 
 from ccdproc import ImageFileCollection
 from ccdproc import CCDData
 import ccdproc
 
-from fix_header import fix_header
+
+class Main():
+    def __init__(self):
+
+        # if len(sys.argv)!=3:
+        #   print('Usage:\npython goodman_ccdreduction.py [full_path_to_raw_data] [full_path_to_reduced_data]\n')
+        #   exit()
+
+        # indir = sys.argv[1]
+        # outdir = sys.argv[2]
+
+        self.indir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28'
+        self.outdir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28/RED'
+
+        # checking the output dir
+        if not os.path.isdir(self.outdir): os.mkdir(self.outdir)
+        os.chdir(self.outdir)
+
+    def clean_dir(self, dir):
+        """
+        Clean up the directory.
+
+        Parameters
+        ----------
+        dir: str, input directory
+        """
+        import glob
+
+        if os.path.exists(dir):
+            for file in glob.glob(os.path.join(dir, '*')):
+                os.remove(file)
+
+    def fix_header(self, indir, outdir, prefix='', overwrite=False):
+        '''
+        Remove PARAM0, PARAM61, PARAM62, PARAM63 and other inconvenient
+        parameters in the header of the Goodman output files. Some of
+        these parameters contain non-printable ASCII characters.
+
+        Parameters
+        ----------
+        indir: str
+        outdir: str
+        prefix: str, optional
+            path to directory containing FITS files
+        overwrite: boolean
+        '''
+
+        for _file in sorted(glob.glob(os.path.join(indir, '*.fits'))):
+
+            hdulist = fits.open(_file, ignore_missing_end=True)
+            hdr = hdulist[0].header
+
+            # cleaning header
+            _param0 = 'PARAM0' in hdr
+            _param61 = 'PARAM61' in hdr
+            _param62 = 'PARAM62' in hdr
+            _param63 = 'PARAM63' in hdr
+            _pcomm = 'COMMENT' in hdr
+            _phist = 'HISTORY' in hdr
+            _pinst = 'INSTRUME' in hdr
 
 
-# if len(sys.argv)!=3:
-#   print('Usage:\npython goodman_ccdreduction.py [full_path_to_raw_data] [full_path_to_reduced_data]\n')
-#   exit()
+            # noinspection PyBroadException
+            try:
 
-# indir = sys.argv[1]
-# outdir = sys.argv[2]
+                if _pcomm is True:
+                    hdr.remove(keyword='COMMENT')
+                if _phist is True:
+                    hdr.remove(keyword='HISTORY')
+                if _pinst is True:
+                    hdr.remove(keyword='INSTRUME')
+                if _param0 is True:
+                    hdr.remove(keyword='PARAM0')
+                if _param61 is True:
+                    hdr.remove(keyword='PARAM61')
+                if _param62 is True:
+                    hdr.remove(keyword='PARAM62')
+                if _param63 is True:
+                    hdr.remove(keyword='PARAM63')
 
-indir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28'
-outdir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28/RED'
+                hdulist.writeto(os.path.join(outdir, '') + prefix + os.path.basename(_file), clobber=overwrite)
+                hdulist.close()
+                log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated')
 
-# checking the output dir
-if not os.path.isdir(outdir): os.mkdir(outdir)
-os.chdir(outdir)
+            except:
+                pass
 
-def clean_dir(dir):
-    """
-    Clean up the directory.
+        log.info('\n Done --> All keywords header are updated.')
+        return
 
-    Parameters
-    ----------
-    dir: str, input directory
-    """
-    import glob
-    if os.path.exists(dir):
-        for file in glob.glob(os.path.join(dir, '*')):
-            os.remove(file)
+    def run(self):
 
-# cleaning up the output dir
-clean_dir(outdir)
+        # cleaning up the output dir
+        self.clean_dir(self.outdir)
 
-# Cleaning Header from Goodman files
-fix_header(indir, outdir, prefix='c', overwrite=True)
+        # Cleaning Header from Goodman files
+        self.fix_header(self.indir, self.outdir, prefix='c', overwrite=True)
+
+        # change this to point to your header updates raw data directory
+        ic1 = ImageFileCollection(self.outdir)
+
+        return
 
 
-# change this to point to your header updates raw data directory
-ic1 = ImageFileCollection(outdir)
+if __name__ == '__main__':
 
+    main = Main()
+    main.run()
+
+else:
+    print('goodman_ccdreduction.py is not being executed as main.')
+
+'''
 # create the bias frames
 bias_list = []
 for filename in ic1.files_filtered(obstype='BIAS'):
@@ -60,7 +136,6 @@ for filename in ic1.files_filtered(obstype='BIAS'):
 master_bias = ccdproc.combine(bias_list, output = 'master_bias.fits', method='median')
 #master_bias.write('master_bias_blue.fits', clobber=True)
 
-'''
 red_bias_list = []
 for filename in ic1.files_filtered(obstype='Bias', isiarm='Red arm'):
     print ic1.location + filename
