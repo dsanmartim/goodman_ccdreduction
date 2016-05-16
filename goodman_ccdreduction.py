@@ -10,6 +10,13 @@ import ccdproc
 
 from fix_header import fix_header
 
+# if len(sys.argv)!=3:
+#   print('Usage:\npython goodman_ccdreduction.py [full_path_to_raw_data] [full_path_to_reduced_data]\n')
+#   exit()
+
+# indir = sys.argv[1]
+# outdir = sys.argv[2]
+
 indir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28'
 outdir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28/RED'
 
