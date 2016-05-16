@@ -23,8 +23,11 @@ indir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28'
 outdir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28/RED'
 
 # checking the output dir
-if not os.path.isdir(outdir): os.mkdir(outdir)
+if not os.path.isdir(outdir): os.mkdir(outdir) # just a comment
 os.chdir(outdir)
+
+def nada(nada):
+    print 'nada'
 
 def clean_dir(dir):
     """
