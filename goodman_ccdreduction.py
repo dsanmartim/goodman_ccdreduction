@@ -10,6 +10,7 @@ import ccdproc
 
 from fix_header import fix_header
 
+
 # if len(sys.argv)!=3:
 #   print('Usage:\npython goodman_ccdreduction.py [full_path_to_raw_data] [full_path_to_reduced_data]\n')
 #   exit()
@@ -21,11 +22,8 @@ indir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28'
 outdir = '/home/davidsanm/Dados/Soar/SO2014A-028/2014-07-28/RED'
 
 # checking the output dir
-if not os.path.isdir(outdir): os.mkdir(outdir) # just a comment
+if not os.path.isdir(outdir): os.mkdir(outdir)
 os.chdir(outdir)
-
-def nada(nada):
-    print 'nada'
 
 def clean_dir(dir):
     """
