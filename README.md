@@ -29,16 +29,14 @@ Documentation for specific functions of the code can be found directly in the co
 It can be be executed in terminal running 
 
     $ python goodman_ccdreduction.py [options] raw_path red_path 
-
+    
 More information abotu the options and how to use it can be otained by using...
 
     $ python goodman_ccdreduction.py --help
-    
 or
-
     $ python goodman_ccdreduction.py --h
 
-### ToDo Short List
+### ToDo (Short List)
 
 - Consider internal illumination correction (using the flats taken without grating
 -
@@ -50,8 +48,8 @@ or
 If you have any doubt or question, please contact
 
 David Sanmartim 
-*dsanmartim at ctio.noao.edu* (before Set 1st, 2016 )
+<p><b>dsanmartim at ctio.noao.edud</b></p> (before Set 1st, 2016 )
 *dsanmartim at gemini.edu* (after Set 1st, 2016))
-    
+   
 July 2016
 
