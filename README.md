@@ -39,17 +39,13 @@ or
 ### ToDo (Short List)
 
  - Consider internal illumination correction (using the flats taken without grating
- -
- -
- -
 
 ### Suggestions and Questions
 
-If you have any doubt or question, please contact
+If you have any doubt or question, please contact David Sanmartim 
 
-David Sanmartim 
-<p><b>dsanmartim at ctio.noao.edud</b> (before Set 1st, 2016 ) </p> 
-<p><b>dsanmartim at gemini.edu</b> (after Set 1st, 2016) </p> 
+<b>dsanmartim at ctio.noao.edud</b> (before Set 1st, 2016 ) 
+<b>dsanmartim at gemini.edu</b> (after Set 1st, 2016)
    
 July 2016
 
