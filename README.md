@@ -1,40 +1,51 @@
-# Goodman CCD Reduction  
+## PyGoodman CCD Reduction
 
-    Warning: work is still in progress
+Warning: work is still in progress
 
-    Goodman CCDRed performs ccd reductions for Goodman spectroscopic data..
+Goodman CCDRed performs ccd reductions for Goodman spectroscopic data..
 
-    This script performs CCD reduction for spectra taken with the Goodman
-    High Throughput Spectrograph at SOAR Telescope. The scrip will make
-    (in order):
+This script performs CCD reduction for spectra taken with the Goodman High Throughput Spectrograph at SOAR Telescope. The scrip will make (in order):
 
-    - BIAS subtraction
-    - TRIMMING including slit edges identification
-    - FLAT correction
-    - COSMIC rays rejection (optional)
+ - BIAS subtraction
+ - TRIMMING including slit edges identification
+ - FLAT correction
+ - COSMIC rays rejection (optional)
 
-    Users can add a flag in order to clean up science data from cosmic rays, which
-    are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420)
+Users can add a flag in order to clean up science data from cosmic rays, which are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420).
 
-    This script was designed to make CCD reduction for any spectral configuration, but
-    the input dir must contains only an unique spectral configuration (binning, grating,
-    slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following
-    frames:
+### Data Structure
 
-    - BIAS frames
-    - FLAT frames (Flats taken between science exposures during the night
-                     will be combined as normal afternoon calibrations)
-    - ARC frames   (data from focus sequence will not be reduced)
-    - SCIENCE and/or STANDARD frames
+This script was designed to make CCD reduction for any spectral configuration, but the input dir must contains only an unique spectral configuration (binning, grating, slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following frames:
 
-    # ToDo
+ - BIAS frames
+ - FLAT frames (Flats taken between science exposures will be combined together with afternoon calibrations)
+ - ARC frames (data from focus sequence will not be reduced)
+ - SCIENCE and/or STANDARD frames
+ 
+Documentation for specific functions of the code can be found directly in the corresponding function.
 
-    - Consider internal illumination correction
+### How to use it...
 
-    Documentation for specific functions of the code can be found directly in the 
-    corresponding function.
+It can be be executed in terminal running 
 
-    David Sanmartim (dsanmartim at ctio.noao.edu, dsanmartim at gemini.edu)
-    July 2016
+    $ python goodman_ccdreduction.py [options] raw_path red_path 
+    
+More information abotu the options and how to use it can be otained by using...
 
-    Thanks to Bruno Quint for all comments and helping.
+    $ python goodman_ccdreduction.py --help
+or
+    $ python goodman_ccdreduction.py --h
+
+### ToDo (Short List)
+
+ - Consider internal illumination correction (using the flats taken without grating
+
+### Suggestions and Questions
+
+If you have any doubt or question, please contact David Sanmartim 
+
+<b>dsanmartim at ctio.noao.edud</b> (before Set 1st, 2016 ) 
+<b>dsanmartim at gemini.edu</b> (after Set 1st, 2016)
+   
+July 2016
+
