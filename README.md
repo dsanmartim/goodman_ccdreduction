@@ -1,5 +1,7 @@
 # Goodman CCD Reduction  
 
+    Warning: work is still in progress
+
     Goodman CCDRed performs ccd reductions for Goodman spectroscopic data..
 
     This script performs CCD reduction for spectra taken with the Goodman
