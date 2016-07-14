@@ -1,6 +1,6 @@
 # Goodman CCD Reduction  
 
-    Goodman CCDRED performs ccd reductions for Goodman spectroscopic data..
+    Goodman CCDRed performs ccd reductions for Goodman spectroscopic data..
 
     This script performs CCD reduction for spectra taken with the Goodman
     High Throughput Spectrograph at SOAR Telescope. The scrip will make
