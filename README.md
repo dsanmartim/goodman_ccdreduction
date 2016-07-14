@@ -21,19 +21,18 @@
     slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following
     frames:
 
-    1 - BIAS frames
-    2 - FLAT frames (Flats taken between science exposures during the night
+    - BIAS frames
+    - FLAT frames (Flats taken between science exposures during the night
                      will be combined as normal afternoon calibrations)
-    3. ARC frames   (data from focus sequence will not be reduced)
-
-    4. SCIENCE and/or STANDARD frames
+    - ARC frames   (data from focus sequence will not be reduced)
+    - SCIENCE and/or STANDARD frames
 
     # ToDo
 
     - Consider internal illumination correction
 
-    Documentations for specific functions of the code can be found directly
-    in the corresponding function.
+    Documentation for specific functions of the code can be found directly in the 
+    corresponding function.
 
     David Sanmartim (dsanmartim at ctio.noao.edu, dsanmartim at gemini.edu)
     July 2016
