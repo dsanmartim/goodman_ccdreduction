@@ -13,20 +13,45 @@ This script performs CCD reduction for spectra taken with the Goodman High Throu
 
 Users can add a flag in order to clean up science data from cosmic rays, which are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420).
 
+## Data Structure
+
 This script was designed to make CCD reduction for any spectral configuration, but the input dir must contains only an unique spectral configuration (binning, grating, slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following frames:
 
  - BIAS frames
- - FLAT frames (Flats taken between science exposures during the night will be combined as normal afternoon calibrations)
- - ARC frames   (data from focus sequence will not be reduced)
+ - FLAT frames (Flats taken between science exposures will be combined together with afternoon calibrations)
+ - ARC frames (data from focus sequence will not be reduced)
  - SCIENCE and/or STANDARD frames
-
-# ToDo
-
-- Consider internal illumination correction
-
+ 
 Documentation for specific functions of the code can be found directly in the corresponding function.
 
-David Sanmartim (dsanmartim at ctio.noao.edu, dsanmartim at gemini.edu)
+## How to use it...
+
+It can be be executed in terminal running 
+
+    $ python goodman_ccdreduction.py [options] raw_path red_path 
+
+More information abotu the options and how to use it can be otained by using...
+
+    $ python goodman_ccdreduction.py --help
+    
+or
+
+    $ python goodman_ccdreduction.py --h
+
+### ToDo Short List
+
+- Consider internal illumination correction (using the flats taken without grating
+-
+-
+-
+
+### Suggestions and Questions
+
+If you have any doubt or question, please contact
+
+David Sanmartim 
+*dsanmartim at ctio.noao.edu* (before Set 1st, 2016 )
+*dsanmartim at gemini.edu* (after Set 1st, 2016))
     
 July 2016
 
