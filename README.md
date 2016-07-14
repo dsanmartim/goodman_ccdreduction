@@ -33,8 +33,10 @@ It can be be executed in terminal running
 More information abotu the options and how to use it can be otained by using...
 
     $ python goodman_ccdreduction.py --help
+
 or
-    $ python goodman_ccdreduction.py --h
+
+    $ python goodman_ccdreduction.py -h
 
 ### ToDo (Short List)
 
