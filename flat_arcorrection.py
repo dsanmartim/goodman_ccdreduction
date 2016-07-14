@@ -222,6 +222,7 @@ def cor_flat(flat, function='Legendre', order=5, clipping='sigma_clipping', nite
             fit, chi2_dof = fitting(pix, spec, function=function, order=order)
 
             print fit - firstfit
+            # TODO Continuar checagem do codigo a partir daqui...
 
             # print fit - firstfit
             residual = spec - fit

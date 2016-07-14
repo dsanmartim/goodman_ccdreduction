@@ -61,6 +61,8 @@ class Main:
 
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
+        
+        self.clean = args.clean
 
         # checking the reduction directory
         if not os.path.isdir(self.red_path):
@@ -187,7 +189,7 @@ class Main:
         c_flat = flat_collapsed[cut:-cut]
         c_lines = np.arange(0, c_flat.size, 1)
 
-        # Fittin cubic spline. It's working very well with order=5, nsum=2
+        # Fitting cubic spline. It's working very well with order=5, nsum=2
         func_splin3 = self.fit_spline3(c_flat, order=5, nsum=2)
         smooth_flat = func_splin3(c_lines)
 
@@ -246,7 +248,7 @@ class Main:
             for grt in dic_flat.keys():
 
                 flat_list = []
-                log.info('Combining and trimming flat frames:\n')
+                log.info('Combining and trimming flat frames:')
                 for filename in dic_flat[grt]:
                     log.info(filename)
                     ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
@@ -262,17 +264,17 @@ class Main:
                 master_flat.write(master_flat_name, clobber=True)
 
                 print '\n'
-                log.info('A master flat has been created.\n')
+                log.info('A master flat has been created.')
 
         else:
             print '\n'
-            log.info('Flat files have not been found.\n')
+            log.info('Flat files have not been found.')
 
         if len(dic_flatnogrt.values()) != 0:
 
             for grt in dic_flatnogrt.keys():
                 flatnogrt_list = []
-                log.info('Combining and trimming flat frame taken without grating:\n')
+                log.info('Combining and trimming flat frame taken without grating:')
                 for filename in dic_flatnogrt[grt]:
                     log.info(filename)
                     ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
@@ -285,10 +287,10 @@ class Main:
                 master_flat_nogrt_name = 'master_flat_nogrt.fits'
                 master_flat_nogrt.write(master_flat_nogrt_name, clobber=True)
                 print '\n'
-                log.info('A master flat (taken without grating) have been created.\n')
+                log.info('A master flat (taken without grating) have been created.')
         else:
             print '\n'
-            log.info('Flat files (taken without grating) have not been found.\n')
+            log.info('Flat files (taken without grating) have not been found.')
 
         return
 
@@ -296,7 +298,7 @@ class Main:
     def create_master_bias(image_collection):
         global master_bias
         bias_list = []
-        log.info('Combining and trimming bias frames:\n')
+        log.info('Combining and trimming bias frames:')
         for filename in image_collection.files_filtered(obstype='BIAS'):
             log.info(filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
@@ -312,7 +314,7 @@ class Main:
         master_bias.write('master_bias.fits', clobber=True)
 
         print '\n'
-        log.info('A master bias have been created.\n')
+        log.info('A master bias have been created.')
         return
 
     # TODO create a function to remove bad pixels from master bias
@@ -320,7 +322,7 @@ class Main:
     @staticmethod
     def reduce_arc(image_collection):
         # reduce the arc frames
-        log.info('Reduding Arc frames:\n')
+        log.info('Reduding Arc frames:')
         for filename in image_collection.files_filtered(obstype='COMP'):
             log.info(filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
@@ -330,10 +332,10 @@ class Main:
             ccd = ccdproc.flat_correct(ccd, master_flat)
             ccd.write('arc_' + filename, clobber=True)
         print '\n'
-        log.info('Arc frames have been reduced. \n ')
+        log.info('Arc frames have been reduced. ')
 
     @staticmethod
-    def reduce_sci(image_collection):
+    def reduce_sci(image_collection, clean):
         # reduce the sci frames
         log.info('Reduding Sci (Std) frames:')
         for filename in image_collection.files_filtered(obstype='OBJECT'):
@@ -343,8 +345,8 @@ class Main:
             ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
             ccd = ccdproc.subtract_bias(ccd, master_bias)
             ccd = ccdproc.flat_correct(ccd, master_flat)
-            if args.clean is True:
-                log.info('Cleaning cosmic rays... \n')
+            if clean is True:
+                log.info('Cleaning cosmic rays... ')
                 print '\n'
                 nccd = ccdproc.cosmicray_lacosmic(ccd, sigclip=3.0, sigfrac=2.0, objlim=2.0,
                                                   gain=float(ccd.header['GAIN']),
@@ -363,7 +365,7 @@ class Main:
         self.clean_path(self.red_path)
 
         # Fixing header and shape of raw data
-        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='', overwrite=True)
+        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='f', overwrite=True)
 
         # Create image file collection for raw data
         ic = ImageFileCollection(self.red_path)
@@ -378,7 +380,7 @@ class Main:
         self.reduce_arc(ic)
 
         # Reduce Sci frames
-        self.reduce_sci(ic)
+        self.reduce_sci(ic, self.clean)
 
         return
 
