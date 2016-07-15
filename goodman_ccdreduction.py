@@ -268,9 +268,7 @@ class Main:
 
     @staticmethod
     def create_master_bias(image_collection, slit):
-        """
 
-        """
         global master_bias
         bias_list = []
         log.info('Combining and trimming bias frames:')
@@ -299,32 +297,21 @@ class Main:
 
     @staticmethod
     def reduce_arc(image_collection, slit, prefix):
-        # reduce the arc frames
-        print '\n\n' + prefix + '\n\n'
-        prefix = 'arc_fz' + prefix
-        print '\n\n' + prefix + '\n\n'
+
         for filename in image_collection.files_filtered(obstype='COMP'):
             log.info('Reduding Arc frame ' + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             if slit is True:
                 ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-
-            print 'aqui 1'
             ccd = ccdproc.subtract_bias(ccd, master_bias)
-            print 'aqui 2'
             ccd = ccdproc.flat_correct(ccd, master_flat)
             ccd.write(prefix + filename, clobber=True)
         print '\n'
         log.info('Arc frames have been reduced. ')
 
     @staticmethod
-    def reduce_sci(image_collection, clean, slit, prefix):
-        # reduce the sci frames
-        print '\n\n' + prefix + '\n\n'
-        prefix_cosmic = 'obj_cfz' + prefix
-        prefix = 'obj_fz' + prefix
-        print '\n\n' + prefix + '\n\n'
+    def reduce_sci(image_collection, slit, clean, prefix):
 
         for filename in image_collection.files_filtered(obstype='OBJECT'):
             log.info('Reduding Sci/Std frame ' + filename)
@@ -334,15 +321,22 @@ class Main:
                 ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
             ccd = ccdproc.subtract_bias(ccd, master_bias)
             ccd = ccdproc.flat_correct(ccd, master_flat)
+            # OBS: cosmic ray rejection is working pretty well by defining gain = 1. It's not working
+            # when we use the real gain of the image. In this case the sky level changes by a factor
+            # equal the gain.
             if clean is True:
                 log.info('Cleaning cosmic rays... ')
                 print '\n'
-                nccd = ccdproc.cosmicray_lacosmic(ccd, sigclip=3.0, sigfrac=2.0, objlim=2.0,
-                                                  gain=float(ccd.header['GAIN']),
-                                                  readnoise=float(ccd.header['RDNOISE']),
-                                                  satlevel=np.inf, sepmed=True, fsmode='convolve',
-                                                  psfmodel='gaussy', verbose=True)
-                nccd.write(prefix_cosmic + filename, clobber=True)
+                # This will convert ccd to a numpy array. It will make thins easy to lacosmic input.
+                nccd, _ = ccdproc.cosmicray_lacosmic(ccd.data, sigclip=2.5, sigfrac=2.0, objlim=3.0,
+                                                     gain=float(ccd.header['GAIN']),
+                                                     readnoise=float(ccd.header['RDNOISE']),
+                                                     satlevel=np.inf, sepmed=True, fsmode='median',
+                                                     psfmodel='gaussy', verbose=True)
+                print '\n'
+                nccd /= float(ccd.header['GAIN'])
+                nccd = np.array(nccd, dtype=np.double)
+                fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
             ccd.write(prefix + filename, clobber=True)
 
         print '\n'
@@ -354,8 +348,7 @@ class Main:
         self.clean_path(self.red_path)
 
         # Fixing header and shape of raw data
-        prefix = 'h.'
-        self.fix_header_and_shape(self.raw_path, self.red_path, prefix=prefix, overwrite=True)
+        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
 
         # Create image file collection for raw data
         ic = ImageFileCollection(self.red_path)
@@ -368,10 +361,10 @@ class Main:
         self.create_master_bias(ic, self.slit)
 
         # Reduce Arc frames
-        self.reduce_arc(ic, self.slit, prefix=prefix)
+        self.reduce_arc(ic, self.slit, prefix='arc_fz')
 
         # Reduce Sci frames
-        self.reduce_sci(ic, self.clean, self.slit, prefix=prefix)
+        self.reduce_sci(ic, self.slit, self.clean, prefix='obj_fz')
 
         return
 
