@@ -58,7 +58,14 @@ import matplotlib.pyplot as plt
 import ccdproc
 from ccdproc import ImageFileCollection
 from ccdproc import CCDData
+import warnings
 
+warnings.filterwarnings('ignore')
+
+__author__ = 'David Sanmartim'
+__date__ = '2016-07-15'
+__version__ = "0.1"
+__email__ = "dsanmartim@ctio.noao.edu"
 
 class Main:
     def __init__(self):
@@ -133,6 +140,7 @@ class Main:
             key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3']
 
             # Keyword to be changed (3 --> 2)
+            hdr['N_PARAM'] -= len(key_list_to_remove)
             hdr['NAXIS'] = 2
             for key in key_list_to_remove:
                 try:
@@ -140,12 +148,13 @@ class Main:
                         hdr.remove(keyword=key)
                 except KeyError:
                     pass
-
+            hdr.add_history('Header has been fixed.')
             fits.writeto(os.path.join(output_path, '') + prefix + os.path.basename(_file), ccddata, hdr,
                          clobber=overwrite)
-            log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated')
-        print '\n'
-        log.info('Done --> All keywords header are updated.')
+            log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated --> ' + prefix
+                     + os.path.basename(_file))
+        log.info('Done: all keywords header have been updated.')
+        print('\n')
         return
 
     def find_slitedge(self, ccddata):
@@ -228,18 +237,18 @@ class Main:
                 master_flat = ccdproc.combine(flat_list, method='median', sigma_clip=True,
                                               sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
                 if slit is True:
-                    print '\n Wait a minute... finding slit edges.'
+                    print('\n Finding slit edges... \n')
                     slit1, slit2 = self.find_slitedge(master_flat)
                     master_flat = ccdproc.trim_image(master_flat[slit1:slit2, :])
                 master_flat_name = 'master_flat_' + grt[5:] + '.fits'
                 master_flat.write(master_flat_name, clobber=True)
 
-                print '\n'
-                log.info('A master flat has been created.')
+                log.info('Done: master flat has been created --> ' + 'master_flat_' + grt[5:] + '.fits')
+                print('\n')
 
         else:
-            print '\n'
             log.info('Flat files have not been found.')
+            print('\n')
 
         if len(dic_flatnogrt.values()) != 0:
 
@@ -258,11 +267,12 @@ class Main:
                     master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
                 master_flat_nogrt_name = 'master_flat_nogrt.fits'
                 master_flat_nogrt.write(master_flat_nogrt_name, clobber=True)
-                print '\n'
-                log.info('A master flat (taken without grating) have been created.')
+
+                log.info('Done: master flat (taken without grating) have been created --> master_flat_nogrt.fits')
+                print('\n')
         else:
-            print '\n'
             log.info('Flat files (taken without grating) have not been found.')
+            print('\n')
 
         return
 
@@ -289,8 +299,8 @@ class Main:
             master_bias = master_bias
         master_bias.write('master_bias.fits', clobber=True)
 
-        print '\n'
-        log.info('A master bias have been created.')
+        log.info('Done: a master bias have been created --> master_bias.fits')
+        print('\n')
         return
 
     # TODO create a function to remove bad pixels from master bias
@@ -299,7 +309,7 @@ class Main:
     def reduce_arc(image_collection, slit, prefix):
 
         for filename in image_collection.files_filtered(obstype='COMP'):
-            log.info('Reduding Arc frame ' + filename)
+            log.info('Reduding Arc frame ' + filename + ' --> ' + prefix + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             if slit is True:
@@ -307,14 +317,14 @@ class Main:
             ccd = ccdproc.subtract_bias(ccd, master_bias)
             ccd = ccdproc.flat_correct(ccd, master_flat)
             ccd.write(prefix + filename, clobber=True)
-        print '\n'
-        log.info('Arc frames have been reduced. ')
+        log.info('Done --> Arc frames have been reduced.')
+        print('\n')
 
     @staticmethod
     def reduce_sci(image_collection, slit, clean, prefix):
 
         for filename in image_collection.files_filtered(obstype='OBJECT'):
-            log.info('Reduding Sci/Std frame ' + filename)
+            log.info('Reduding Sci/Std frame ' + filename + ' --> ' + prefix + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             if slit is True:
@@ -326,21 +336,18 @@ class Main:
             # equal the gain.
             if clean is True:
                 log.info('Cleaning cosmic rays... ')
-                print '\n'
-                # This will convert ccd to a numpy array. It will make thins easy to lacosmic input.
                 nccd, _ = ccdproc.cosmicray_lacosmic(ccd.data, sigclip=2.5, sigfrac=2.0, objlim=3.0,
                                                      gain=float(ccd.header['GAIN']),
                                                      readnoise=float(ccd.header['RDNOISE']),
                                                      satlevel=np.inf, sepmed=True, fsmode='median',
                                                      psfmodel='gaussy', verbose=True)
-                print '\n'
-                nccd /= float(ccd.header['GAIN'])
-                nccd = np.array(nccd, dtype=np.double)
+                log.info('Cosmic rays have been cleaned ' + prefix + filename + ' --> ' + 'c' + prefix + filename)
+                print('\n')
+                nccd = np.array(nccd, dtype=np.double) / float(ccd.header['GAIN'])
                 fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
             ccd.write(prefix + filename, clobber=True)
-
-        print '\n'
-        log.info('Sci/Std frames have been reduced ')
+        log.info('Done: Sci/Std frames have been reduced.')
+        print('\n')
 
     def run(self):
 
@@ -361,10 +368,10 @@ class Main:
         self.create_master_bias(ic, self.slit)
 
         # Reduce Arc frames
-        self.reduce_arc(ic, self.slit, prefix='arc_fz')
+        self.reduce_arc(ic, self.slit, prefix='fz')
 
         # Reduce Sci frames
-        self.reduce_sci(ic, self.slit, self.clean, prefix='obj_fz')
+        self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
 
         return
 
@@ -378,7 +385,7 @@ if __name__ == '__main__':
                         help="Clean cosmic rays from science data.")
 
     parser.add_argument('-s', '--slit', action='store_true',
-                        help="Find slit edge to make an additional trimming.")
+                        help="Find slit edge to make an additional trimming (recommended).")
 
     parser.add_argument('raw_path', metavar='raw_path', type=str, nargs=1,
                         help="Full path to raw data (e.g. /home/jamesbond/soardata/).")
