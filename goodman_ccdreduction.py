@@ -1,7 +1,9 @@
 # -*- coding: utf8 -*-
 
 """
-    Goodman CCDRED - Performs ccd reductions of Goodman spectroscopic data..
+    ## PyGoodman CCD Reduction
+
+    Goodman CCDRed performs ccd reductions for Goodman spectroscopic data.
 
     This script performs CCD reduction for spectra taken with the Goodman
     High Throughput Spectrograph at SOAR Telescope. The scrip will make
@@ -15,24 +17,26 @@
     Users can add a flag in order to clean up science data from cosmic rays, which
     are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420)
 
+    ### Data Structure
+
+    Documentations for specific functions of the code can be found directly
+    in the corresponding function.
+
+
     This script was designed to make CCD reduction for any spectral configuration, but
     the input dir must contains only an unique spectral configuration (binning, grating,
     slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following
     frames:
 
-    1 - BIAS frames
-    2 - FLAT frames (Flats taken between science exposures during the night
-                     will be combined as normal afternoon calibrations)
-    3. ARC frames   (data from focus sequence will not be reduced)
-
-    4. SCIENCE and/or STANDARD frames
+    - BIAS frames
+    - FLAT frames FLAT frames (Flats taken between science exposures will be combined together with
+                                 afternoon calibrations)
+    - ARC frames   (data from focus sequence will not be reduced)
+    - SCIENCE and/or STANDARD frames
 
     # ToDo
 
     - Consider internal illumination correction
-
-    Documentations for specific functions of the code can be found directly
-    in the corresponding function.
 
     David Sanmartim (dsanmartim at ctio.noao.edu, dsanmartim at gemini.edu)
     July 2016
@@ -61,8 +65,9 @@ class Main:
 
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
-        
+
         self.clean = args.clean
+        self.slit = args.slit
 
         # checking the reduction directory
         if not os.path.isdir(self.red_path):
@@ -113,67 +118,32 @@ class Main:
                 os.remove(_file)
 
     @staticmethod
-    def fix_header_and_shape(input_path, output_path, prefix='', overwrite=False):
+    def fix_header_and_shape(input_path, output_path, prefix, overwrite=False):
         """
         Remove/Update some  inconvenient parameters in the header of the Goodman FITS
         files. Some of these parameters contain non-printable ASCII characters. The ouptut
         files are created in the output_path. Also convert fits from 3D [1,X,Y] to 2D [X,Y].
-
-        Parameters
-        ----------
-        indir: str
-        outdir: str
-        prefix: str, optional
-            path to directory containing FITS files
-        overwrite: boolean
         """
-
         for _file in sorted(glob.glob(os.path.join(input_path, '*.fits'))):
 
             ccddata, hdr = fits.getdata(_file, header=True, ignore_missing_end=True)
-
             # 3D to 2D
             ccddata = ccddata[0]
+            # keywords to remove
+            key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3']
 
-            # Inspectin True or False
-            _param0 = 'PARAM0' in hdr
-            _param61 = 'PARAM61' in hdr
-            _param62 = 'PARAM62' in hdr
-            _param63 = 'PARAM63' in hdr
-            # _pcomm = 'COMMENT' in hdr
-            _phist = 'HISTORY' in hdr
-            _pinst = 'INSTRUME' in hdr
-            _pnaxis = 'NAXIS' in hdr
-            _pnaxis3 = 'NAXIS3' in hdr
+            # Keyword to be changed (3 --> 2)
+            hdr['NAXIS'] = 2
+            for key in key_list_to_remove:
+                try:
+                    if (key in hdr) is True:
+                        hdr.remove(keyword=key)
+                except KeyError:
+                    pass
 
-            # cleaning header
-            try:
-
-                if _pnaxis is True:
-                    hdr['NAXIS'] = 2
-                if _pnaxis3 is True:
-                    hdr.remove(keyword='NAXIS3')
-                # if _pcomm is True:
-                #    hdr.remove(keyword='COMMENT')
-                if _phist is True:
-                    hdr.remove(keyword='HISTORY')
-                if _pinst is True:
-                    hdr.remove(keyword='INSTRUME')
-                if _param0 is True:
-                    hdr.remove(keyword='PARAM0')
-                if _param61 is True:
-                    hdr.remove(keyword='PARAM61')
-                if _param62 is True:
-                    hdr.remove(keyword='PARAM62')
-                if _param63 is True:
-                    hdr.remove(keyword='PARAM63')
-
-                fits.writeto(os.path.join(output_path, '') + prefix + os.path.basename(_file), ccddata, hdr,
-                             clobber=overwrite)
-                log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated')
-
-            except:
-                pass
+            fits.writeto(os.path.join(output_path, '') + prefix + os.path.basename(_file), ccddata, hdr,
+                         clobber=overwrite)
+            log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated')
         print '\n'
         log.info('Done --> All keywords header are updated.')
         return
@@ -228,7 +198,7 @@ class Main:
 
         return slit_1, slit_2
 
-    def create_master_flat(self, image_collection):
+    def create_master_flat(self, image_collection, slit):
 
         global slit1, slit2, master_flat, master_flat_nogrt
 
@@ -257,9 +227,10 @@ class Main:
                 # combinning and trimming slit edges
                 master_flat = ccdproc.combine(flat_list, method='median', sigma_clip=True,
                                               sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
-                print '\n Wait a minute... finding slit edges.'
-                slit1, slit2 = self.find_slitedge(master_flat)
-                master_flat = ccdproc.trim_image(master_flat[slit1:slit2, :])
+                if slit is True:
+                    print '\n Wait a minute... finding slit edges.'
+                    slit1, slit2 = self.find_slitedge(master_flat)
+                    master_flat = ccdproc.trim_image(master_flat[slit1:slit2, :])
                 master_flat_name = 'master_flat_' + grt[5:] + '.fits'
                 master_flat.write(master_flat_name, clobber=True)
 
@@ -283,7 +254,8 @@ class Main:
                 # combining and trimming slit edges
                 master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', sigma_clip=True,
                                                     sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
-                master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
+                if slit is True:
+                    master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
                 master_flat_nogrt_name = 'master_flat_nogrt.fits'
                 master_flat_nogrt.write(master_flat_nogrt_name, clobber=True)
                 print '\n'
@@ -295,7 +267,10 @@ class Main:
         return
 
     @staticmethod
-    def create_master_bias(image_collection):
+    def create_master_bias(image_collection, slit):
+        """
+
+        """
         global master_bias
         bias_list = []
         log.info('Combining and trimming bias frames:')
@@ -310,7 +285,10 @@ class Main:
             bias_list.append(ccd)
         master_bias = ccdproc.combine(bias_list, method='median', sigma_clip=True, sigma_clip_low_thresh=1.0,
                                       sigma_clip_high_thresh=1.0)
-        master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
+        if slit is True:
+            master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
+        else:
+            master_bias = master_bias
         master_bias.write('master_bias.fits', clobber=True)
 
         print '\n'
@@ -320,29 +298,40 @@ class Main:
     # TODO create a function to remove bad pixels from master bias
 
     @staticmethod
-    def reduce_arc(image_collection):
+    def reduce_arc(image_collection, slit, prefix):
         # reduce the arc frames
-        log.info('Reduding Arc frames:')
+        print '\n\n' + prefix + '\n\n'
+        prefix = 'arc_fz' + prefix
+        print '\n\n' + prefix + '\n\n'
         for filename in image_collection.files_filtered(obstype='COMP'):
-            log.info(filename)
+            log.info('Reduding Arc frame ' + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
-            ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
+            if slit is True:
+                ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
+
+            print 'aqui 1'
             ccd = ccdproc.subtract_bias(ccd, master_bias)
+            print 'aqui 2'
             ccd = ccdproc.flat_correct(ccd, master_flat)
-            ccd.write('arc_' + filename, clobber=True)
+            ccd.write(prefix + filename, clobber=True)
         print '\n'
         log.info('Arc frames have been reduced. ')
 
     @staticmethod
-    def reduce_sci(image_collection, clean):
+    def reduce_sci(image_collection, clean, slit, prefix):
         # reduce the sci frames
-        log.info('Reduding Sci (Std) frames:')
+        print '\n\n' + prefix + '\n\n'
+        prefix_cosmic = 'obj_cfz' + prefix
+        prefix = 'obj_fz' + prefix
+        print '\n\n' + prefix + '\n\n'
+
         for filename in image_collection.files_filtered(obstype='OBJECT'):
-            log.info(filename)
+            log.info('Reduding Sci/Std frame ' + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
-            ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
+            if slit is True:
+                ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
             ccd = ccdproc.subtract_bias(ccd, master_bias)
             ccd = ccdproc.flat_correct(ccd, master_flat)
             if clean is True:
@@ -353,11 +342,11 @@ class Main:
                                                   readnoise=float(ccd.header['RDNOISE']),
                                                   satlevel=np.inf, sepmed=True, fsmode='convolve',
                                                   psfmodel='gaussy', verbose=True)
-                nccd.write('c_obj_' + filename, clobber=True)
-            ccd.write('obj_' + filename, clobber=True)
+                nccd.write(prefix_cosmic + filename, clobber=True)
+            ccd.write(prefix + filename, clobber=True)
 
         print '\n'
-        log.info('Sci (std) frames have been reduced ')
+        log.info('Sci/Std frames have been reduced ')
 
     def run(self):
 
@@ -365,22 +354,24 @@ class Main:
         self.clean_path(self.red_path)
 
         # Fixing header and shape of raw data
-        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='f', overwrite=True)
+        prefix = 'h.'
+        self.fix_header_and_shape(self.raw_path, self.red_path, prefix=prefix, overwrite=True)
 
         # Create image file collection for raw data
         ic = ImageFileCollection(self.red_path)
 
+        # ToDo Check the slit edge option... it seems there is a problem with the reduction
         # Create master_flats
-        self.create_master_flat(ic)
+        self.create_master_flat(ic, self.slit)
 
         # Create master bias
-        self.create_master_bias(ic)
+        self.create_master_bias(ic, self.slit)
 
         # Reduce Arc frames
-        self.reduce_arc(ic)
+        self.reduce_arc(ic, self.slit, prefix=prefix)
 
         # Reduce Sci frames
-        self.reduce_sci(ic, self.clean)
+        self.reduce_sci(ic, self.clean, self.slit, prefix=prefix)
 
         return
 
@@ -391,7 +382,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="Goodman - CCD Data Reduction.")
 
     parser.add_argument('-c', '--clean', action='store_true',
-                        help="Clean cosmic rays from science data")
+                        help="Clean cosmic rays from science data.")
+
+    parser.add_argument('-s', '--slit', action='store_true',
+                        help="Find slit edge to make an additional trimming.")
 
     parser.add_argument('raw_path', metavar='raw_path', type=str, nargs=1,
                         help="Full path to raw data (e.g. /home/jamesbond/soardata/).")
