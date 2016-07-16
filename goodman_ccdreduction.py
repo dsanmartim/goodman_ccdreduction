@@ -183,14 +183,14 @@ class Main:
         dy2_one, dy2_two = dy2[0:pixa], dy2[pixb:]
 
         # Reg. 1: Compute local min/max of the 2nd derivative
-        list_min_1, list_max_1, id_min_1, id_max_1 = self.local_minmax(dy2_one, nmin=1, nmax=1)
-        list_min_2, list_max_2, id_min_2, id_max_2 = self.local_minmax(dy2_two, nmin=1, nmax=1)
+        list_min_1, _, id_min_1, _ = self.local_minmax(dy2_one, nmin=1, nmax=1)
+        list_min_2, _, id_min_2, _ = self.local_minmax(dy2_two, nmin=1, nmax=1)
 
         # Indice have to be reshifted to the original indices of the function dy2
-        id_min_2 = np.array(id_min_2) + pixb
+        #id_min_2 = np.array(id_min_2) + pixb
 
         # Slit edges are the local maxima/minima 1/2 [accounting the cutted pixels]
-        slit_1, slit_2 = int(np.array(id_min_1) + cut), int(np.array(id_min_2) + cut)
+        slit_1, slit_2 = int(np.array(id_min_1) + cut), int(np.array(np.array(id_min_2) + pixb) + cut)
 
         plot = 'no'
         if plot is 'yes':
@@ -316,6 +316,7 @@ class Main:
                 ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
             ccd = ccdproc.subtract_bias(ccd, master_bias)
             ccd = ccdproc.flat_correct(ccd, master_flat)
+            ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
             ccd.write(prefix + filename, clobber=True)
         log.info('Done --> Arc frames have been reduced.')
         print('\n')
@@ -336,7 +337,7 @@ class Main:
             # equal the gain.
             if clean is True:
                 log.info('Cleaning cosmic rays... ')
-                nccd, _ = ccdproc.cosmicray_lacosmic(ccd.data, sigclip=2.5, sigfrac=2.0, objlim=3.0,
+                nccd, _ = ccdproc.cosmicray_lacosmic(ccd.data, sigclip=2.5, sigfrac=2.0, objlim=2.0,
                                                      gain=float(ccd.header['GAIN']),
                                                      readnoise=float(ccd.header['RDNOISE']),
                                                      satlevel=np.inf, sepmed=True, fsmode='median',
@@ -344,7 +345,10 @@ class Main:
                 log.info('Cosmic rays have been cleaned ' + prefix + filename + ' --> ' + 'c' + prefix + filename)
                 print('\n')
                 nccd = np.array(nccd, dtype=np.double) / float(ccd.header['GAIN'])
+                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+                ccd.header['HISTORY'] = "Cosmic rays rejected."
                 fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
+            ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
             ccd.write(prefix + filename, clobber=True)
         log.info('Done: Sci/Std frames have been reduced.')
         print('\n')
