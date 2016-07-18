@@ -60,15 +60,18 @@ from ccdproc import ImageFileCollection
 from ccdproc import CCDData
 import warnings
 
-warnings.filterwarnings('ignore')
-
 __author__ = 'David Sanmartim'
 __date__ = '2016-07-15'
 __version__ = "0.1"
 __email__ = "dsanmartim@ctio.noao.edu"
 
+
 class Main:
     def __init__(self):
+
+        global memlim
+
+        memlim = 16E9
 
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
@@ -81,8 +84,9 @@ class Main:
             os.mkdir(self.red_path)
         os.chdir(self.red_path)
 
+        warnings.filterwarnings('ignore')
+
         log.propagate = False
-        log.disable_warnings_logging()
 
     @staticmethod
     def fit_spline3(y, order=3, nsum=5):
@@ -148,7 +152,7 @@ class Main:
                         hdr.remove(keyword=key)
                 except KeyError:
                     pass
-            hdr.add_history('Header has been fixed.')
+            hdr.add_history('Header and Shape fixed.')
             fits.writeto(os.path.join(output_path, '') + prefix + os.path.basename(_file), ccddata, hdr,
                          clobber=overwrite)
             log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated --> ' + prefix
@@ -187,7 +191,7 @@ class Main:
         list_min_2, _, id_min_2, _ = self.local_minmax(dy2_two, nmin=1, nmax=1)
 
         # Indice have to be reshifted to the original indices of the function dy2
-        #id_min_2 = np.array(id_min_2) + pixb
+        # id_min_2 = np.array(id_min_2) + pixb
 
         # Slit edges are the local maxima/minima 1/2 [accounting the cutted pixels]
         slit_1, slit_2 = int(np.array(id_min_1) + cut), int(np.array(np.array(id_min_2) + pixb) + cut)
@@ -209,7 +213,12 @@ class Main:
 
     def create_master_flat(self, image_collection, slit):
 
-        global slit1, slit2, master_flat, master_flat_nogrt
+        global slit1, slit2, \
+            master_flat, master_flat_nogrt, \
+            master_flat_name, master_flat_nogrt_name
+
+        master_flat = []
+        master_flat_nogrt = []
 
         # Creating dict. of flats. The key values are expected to be: GRATIN_ID and '<NO GRATING>'
         # if there is flat taken w/o grating
@@ -233,13 +242,15 @@ class Main:
                     ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                     ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
                 flat_list.append(ccd)
+
                 # combinning and trimming slit edges
-                master_flat = ccdproc.combine(flat_list, method='median', sigma_clip=True,
+                master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memlim, sigma_clip=True,
                                               sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
                 if slit is True:
                     print('\n Finding slit edges... \n')
                     slit1, slit2 = self.find_slitedge(master_flat)
                     master_flat = ccdproc.trim_image(master_flat[slit1:slit2, :])
+
                 master_flat_name = 'master_flat_' + grt[5:] + '.fits'
                 master_flat.write(master_flat_name, clobber=True)
 
@@ -260,11 +271,13 @@ class Main:
                     ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                     ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
                 flatnogrt_list.append(ccd)
+
                 # combining and trimming slit edges
-                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', sigma_clip=True,
+                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memlim, sigma_clip=True,
                                                     sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
                 if slit is True:
                     master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
+
                 master_flat_nogrt_name = 'master_flat_nogrt.fits'
                 master_flat_nogrt.write(master_flat_nogrt_name, clobber=True)
 
@@ -291,16 +304,30 @@ class Main:
             # ccd = ccdproc.subtract_overscan(ccd, median=True, overscan_axis=1, overscan=ccd[:, over_start:])
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             bias_list.append(ccd)
-        master_bias = ccdproc.combine(bias_list, method='median', sigma_clip=True, sigma_clip_low_thresh=1.0,
-                                      sigma_clip_high_thresh=1.0)
+        master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memlim, sigma_clip=True,
+                                      sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
         if slit is True:
             master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
         else:
             master_bias = master_bias
+        master_bias.header['HISTORY'] = "Trimmed."
         master_bias.write('master_bias.fits', clobber=True)
+
+        # Now I obtained bias... subtracting bias from master flat
+        # Testing if master_flats are not empty arrays
+        if (not master_flat) is False:
+            fccd = ccdproc.subtract_bias(master_flat, master_bias)
+            fccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+            fccd.write(master_flat_name, clobber=True)
+
+        if (not master_flat_nogrt) is False:
+            ngccd = ccdproc.subtract_bias(master_flat_nogrt, master_bias)
+            ngccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+            ngccd.write(master_flat_nogrt_name, clobber=True)
 
         log.info('Done: a master bias have been created --> master_bias.fits')
         print('\n')
+
         return
 
     # TODO create a function to remove bad pixels from master bias
@@ -308,6 +335,7 @@ class Main:
     @staticmethod
     def reduce_arc(image_collection, slit, prefix):
 
+        log.info('Reduding Arc frames...')
         for filename in image_collection.files_filtered(obstype='COMP'):
             log.info('Reduding Arc frame ' + filename + ' --> ' + prefix + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
@@ -324,6 +352,7 @@ class Main:
     @staticmethod
     def reduce_sci(image_collection, slit, clean, prefix):
 
+        log.info('Reduding Sci/Std frames...')
         for filename in image_collection.files_filtered(obstype='OBJECT'):
             log.info('Reduding Sci/Std frame ' + filename + ' --> ' + prefix + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
@@ -348,7 +377,8 @@ class Main:
                 ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
                 ccd.header['HISTORY'] = "Cosmic rays rejected."
                 fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
-            ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+            elif clean is False:
+                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
             ccd.write(prefix + filename, clobber=True)
         log.info('Done: Sci/Std frames have been reduced.')
         print('\n')
