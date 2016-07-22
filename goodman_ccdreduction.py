@@ -53,7 +53,10 @@ from astropy.io import fits
 from astropy import log
 from astropy import units as u
 from scipy.interpolate import interp1d
-import matplotlib.pyplot as plt
+
+from astropy.coordinates import EarthLocation
+from astropy.time import Time, TimeDelta
+from astroplan import Observer
 
 import ccdproc
 from ccdproc import ImageFileCollection
@@ -69,7 +72,10 @@ __email__ = "dsanmartim@ctio.noao.edu"
 class Main:
     def __init__(self):
 
-        global memlim
+        global memlim, Geodetic_Location
+
+        # Soar Geodetic Location
+        Geodetic_Location = ['-70d44m01.11s', '-30d14m16.41s', 2748]
 
         memlim = 16E9
 
@@ -157,7 +163,6 @@ class Main:
 
             # Removing duplicated keywords
             key_list = []
-            duplicated_list = []
             for key in hdr.iterkeys():
                 if key in key_list:
                     hdr.remove(keyword=key)
@@ -176,7 +181,6 @@ class Main:
 
         # Reading and Collapsing flat in the dispersion direction
         flat_collapsed = np.sum(ccddata, axis=1) / ccddata.shape[1]
-        lines = np.arange(0, np.size(flat_collapsed), 1)
 
         # Excluding first pixels in the spatial direction
         cut = 3
@@ -188,12 +192,9 @@ class Main:
         smooth_flat = func_splin3(c_lines)
 
         # Compute 1st and flat smoothed
-        dy = np.gradient(smooth_flat)
-        dy2 = np.gradient(dy)
+        dy2 = np.gradient(np.gradient(smooth_flat))
 
-        # Regions to compute local minina-maxima
-        # Region one: it represent first 40 percent of all data
-        # Region two: ... last 40%
+        # Region one: it represent first 40 percent of all data. Region two: ... last 40%
         pixa, pixb = int(len(c_flat) * 0.4), int(len(c_flat) * 0.6)
         dy2_one, dy2_two = dy2[0:pixa], dy2[pixb:]
 
@@ -201,28 +202,55 @@ class Main:
         list_min_1, _, id_min_1, _ = self.local_minmax(dy2_one, nmin=1, nmax=1)
         list_min_2, _, id_min_2, _ = self.local_minmax(dy2_two, nmin=1, nmax=1)
 
-        # Indice have to be reshifted to the original indices of the function dy2
-        # id_min_2 = np.array(id_min_2) + pixb
-
         # Slit edges are the local maxima/minima 1/2 [accounting the cutted pixels]
         slit_1, slit_2 = int(np.array(id_min_1) + cut), int(np.array(np.array(id_min_2) + pixb) + cut)
 
-        plot = 'no'
-        if plot is 'yes':
-            c_lines += cut
-            plt.plot(lines, flat_collapsed, 'k-', label='Flat Collapsed')
-            plt.plot(lines[slit_1:slit_2], flat_collapsed[slit_1:slit_2], 'r-', label='Cutted Flat')
-            plt.plot(c_lines, dy, 'g-', label="Dy/dx")
-            plt.plot(c_lines, dy2, 'y-', label="Dy2/dx")
-            plt.plot(slit_1, list_min_1, 'bo', label='Slit Edge 1 ')
-            plt.plot(slit_2, list_min_2, 'ro', label='Slit Edge 2')
-            plt.xlim(lines.min() - 50, lines.max() + 50)
-            plt.legend(loc='best')
-            plt.show()
-
         return slit_1, slit_2
 
-    def create_master_flat(self, image_collection, slit):
+    def get_twilight_time(self, image_collection, observatory, long, lat, elevation, timezone, description):
+
+        '''
+        image_collection: ccdproc object
+        observatory: str, observatory name (e.g. 'Soar Telescope',
+        long: str, dms or deg
+        lat: str, dms or deg
+        elevation: int, meters (define through ellipsoid WGS84)
+        timezone: str, eg. 'UTC'
+        description: str, short description of the observatory
+
+        return: str, twilight evening and twilinght morning (format 'YYYY-MM-DDT00:00:00.00')
+        '''
+        soar_loc = EarthLocation.from_geodetic(long, lat, elevation * u.m, ellipsoid='WGS84')
+
+        soar = Observer(name=observatory, location=soar_loc, timezone=timezone,
+                        description=description)
+
+        dateobs_list = image_collection.values('date-obs')
+        time_first_frame, time_last_frame = Time(min(dateobs_list)).isot, Time(max(dateobs_list)).isot
+
+        twilight_evening = soar.twilight_evening_astronomical(Time(time_first_frame), which='nearest').isot
+        twilight_morning = soar.twilight_morning_astronomical(Time(time_last_frame), which='nearest').isot
+
+        return twilight_evening, twilight_morning
+
+    def get_daycal_flat(self, image_collection):
+
+        """
+        image_collection: ccdproc object
+        return: list of flats
+        """
+
+        twi_eve, _ = self.get_twilight_time(image_collection, 'Soar Telescope', long=Geodetic_Location[0],
+                                            lat=Geodetic_Location[1], elevation=Geodetic_Location[2],
+                                            timezone='UTC', description='Soar Telescope on Cerro Pachon, Chile')
+
+        df = image_collection.ic.summary.to_pandas()
+        dfobj = df['file'][(df['date-obs'] < twi_eve) & (df['obstype'] == 'FLAT')]
+        dayflat_list = dfobj.values.tolist()
+
+        return dayflat_list
+
+    def create_daymaster_flat(self, image_collection, twilight_evening, slit):
 
         global slit1, slit2, \
             master_flat, master_flat_nogrt, \
@@ -235,8 +263,11 @@ class Main:
         # if there is flat taken w/o grating
         grt_list = image_collection.values('grating', unique=True)
         dic_all_flats = {}
+
+        df = image_collection.summary.to_pandas()
         for grt in sorted(grt_list):
-            dic_all_flats[str(grt)] = image_collection.files_filtered(obstype='FLAT', grating=str(grt))
+            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] < twilight_evening) & (df['grating'] == grt)]
+            dic_all_flats[str(grt)] = dfobj.tolist()
 
         # Dict. for flats with grating and without gratintg
         dic_flat = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt != "<NO GRATING>"}
@@ -338,27 +369,51 @@ class Main:
 
         log.info('Done: a master bias have been created --> master_bias.fits')
         print('\n')
-
         return
 
-    # TODO create a function to remove bad pixels from master bias
+    @staticmethod
+    def reduce_nightflats(image_collection, twilight_evening, slit, prefix):
+
+        # 40 min = time before twilight evening to be considered as begining of the night
+        time_before = (Time(twilight_evening)-TimeDelta(2400.0, format='sec')).isot
+
+        log.info('Reducing flat frames taken during the night...')
+        df = image_collection.summary.to_pandas()
+        dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] > time_before) & (df['grating'] != '<NO GRATING>')]
+        nightflat_list = dfobj.tolist()
+        if len(nightflat_list) > 0:
+            for filename in sorted(nightflat_list):
+                log.info('Trimming and bias subtracting frame ' + filename + ' --> ' + prefix + filename)
+                ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
+                ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
+                if slit is True:
+                    ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
+                ccd = ccdproc.subtract_bias(ccd, master_bias)
+                ccd.header['HISTORY'] = "Trimmed. Bias subtracted."
+                ccd.write(prefix + filename, clobber=True)
+            log.info('Done --> Night flat frames have been reduced.')
+            print('\n')
+        return
 
     @staticmethod
     def reduce_arc(image_collection, slit, prefix):
 
         log.info('Reduding Arc frames...')
-        for filename in image_collection.files_filtered(obstype='COMP'):
-            log.info('Reduding Arc frame ' + filename + ' --> ' + prefix + filename)
-            ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
-            ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
-            if slit is True:
-                ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-            ccd = ccdproc.subtract_bias(ccd, master_bias)
-            ccd = ccdproc.flat_correct(ccd, master_flat)
-            ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
-            ccd.write(prefix + filename, clobber=True)
-        log.info('Done --> Arc frames have been reduced.')
-        print('\n')
+        arc_list = image_collection.files_filtered(obstype='COMP')
+        if len(arc_list) > 0:
+            for filename in sorted(arc_list):
+                log.info('Reduding Arc frame ' + filename + ' --> ' + prefix + filename)
+                ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
+                ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
+                if slit is True:
+                    ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
+                ccd = ccdproc.subtract_bias(ccd, master_bias)
+                ccd = ccdproc.flat_correct(ccd, master_flat)
+                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+                ccd.write(prefix + filename, clobber=True)
+            log.info('Done --> Arc frames have been reduced.')
+            print('\n')
+        return
 
     @staticmethod
     def reduce_sci(image_collection, slit, clean, prefix):
@@ -393,6 +448,7 @@ class Main:
             ccd.write(prefix + filename, clobber=True)
         log.info('Done: Sci/Std frames have been reduced.')
         print('\n')
+        return
 
     def run(self):
 
@@ -405,12 +461,20 @@ class Main:
         # Create image file collection for raw data
         ic = ImageFileCollection(self.red_path)
 
-        # ToDo Check the slit edge option... it seems there is a problem with the reduction
+        # Getting twilight time
+        twi_evening, twi_morning  = self.get_twilight_time(ic, observatory='Soar Telescope', long=Geodetic_Location[0],
+                                                           lat=Geodetic_Location[1], elevation=Geodetic_Location[2],
+                                                           timezone='UTC',
+                                                           description='Soar Telescope on Cerro Pachon, Chile')
+
         # Create master_flats
-        self.create_master_flat(ic, self.slit)
+        self.create_daymaster_flat(ic, twi_evening, self.slit)
 
         # Create master bias
         self.create_master_bias(ic, self.slit)
+
+        # Reduce Night Flat frames (if they exist)
+        self.reduce_nightflats(ic, twi_evening, self.slit, prefix='z')
 
         # Reduce Arc frames
         self.reduce_arc(ic, self.slit, prefix='fz')
