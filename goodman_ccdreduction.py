@@ -88,8 +88,8 @@ class Main:
             os.mkdir(self.red_path)
         os.chdir(self.red_path)
 
+        # About warnings
         warnings.filterwarnings('ignore')
-
         log.propagate = False
 
     @staticmethod
