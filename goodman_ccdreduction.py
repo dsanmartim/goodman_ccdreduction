@@ -6,7 +6,7 @@
     Goodman CCDRed performs ccd reductions for Goodman spectroscopic data.
 
     This script performs CCD reduction for spectra taken with the Goodman
-    High Throughput Spectrograph at SOAR Telescope. The scrip will make
+    High Throughput Spectrograph at SOAR Telescope. The script will make
     (in order):
 
     - BIAS subtraction
@@ -20,8 +20,7 @@
     ### Data Structure
 
     Documentations for specific functions of the code can be found directly
-    in the corresponding function.
-
+    in the corresponding function. (To be done...)
 
     This script was designed to make CCD reduction for any spectral configuration, but
     the input dir must contains only an unique spectral configuration (binning, grating,
@@ -29,8 +28,7 @@
     frames:
 
     - BIAS frames
-    - FLAT frames FLAT frames (Flats taken between science exposures will be combined together with
-                                 afternoon calibrations)
+    - FLAT frames  (Flats taken between science exposures will be trimmed and bias subtracted.)
     - ARC frames   (data from focus sequence will not be reduced)
     - SCIENCE and/or STANDARD frames
 
