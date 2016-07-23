@@ -70,13 +70,11 @@ __email__ = "dsanmartim@ctio.noao.edu"
 class Main:
     def __init__(self):
 
-        global memlim, Geodetic_Location
-
         # Soar Geodetic Location
-        Geodetic_Location = ['-70d44m01.11s', '-30d14m16.41s', 2748]
+        self.Geodetic_Location = ['-70d44m01.11s', '-30d14m16.41s', 2748]
 
         # Memory Limit to be used
-        memlim = 16E9
+        self.memlim = 16E9
 
         # Paths
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
@@ -239,8 +237,8 @@ class Main:
         image_collection: ccdproc object
         return: list of flats
         """
-        twi_eve, _ = self.get_twilight_time(image_collection, 'Soar Telescope', long=Geodetic_Location[0],
-                                            lat=Geodetic_Location[1], elevation=Geodetic_Location[2],
+        twi_eve, _ = self.get_twilight_time(image_collection, 'Soar Telescope', long=self.Geodetic_Location[0],
+                                            lat=self.Geodetic_Location[1], elevation=self.Geodetic_Location[2],
                                             timezone='UTC', description='Soar Telescope on Cerro Pachon, Chile')
 
         df = image_collection.summary.to_pandas()
@@ -249,7 +247,7 @@ class Main:
 
         return dayflat_list
 
-    def create_daymaster_flat(self, image_collection, twilight_evening, slit):
+    def create_daymaster_flat(self, image_collection, twilight_evening, slit, memory_limit):
 
         global slit1, slit2, \
             master_flat, master_flat_nogrt, \
@@ -285,7 +283,7 @@ class Main:
                 flat_list.append(ccd)
 
                 # combinning and trimming slit edges
-                master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memlim, sigma_clip=True,
+                master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit, sigma_clip=True,
                                               sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
                 if slit is True:
                     print('\n Finding slit edges... \n')
@@ -314,7 +312,7 @@ class Main:
                 flatnogrt_list.append(ccd)
 
                 # combining and trimming slit edges
-                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memlim, sigma_clip=True,
+                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit, sigma_clip=True,
                                                     sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
                 if slit is True:
                     master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
@@ -331,7 +329,7 @@ class Main:
         return
 
     @staticmethod
-    def create_master_bias(image_collection, slit):
+    def create_master_bias(image_collection, slit, memory_limit):
 
         global master_bias
         bias_list = []
@@ -345,7 +343,7 @@ class Main:
             # ccd = ccdproc.subtract_overscan(ccd, median=True, overscan_axis=1, overscan=ccd[:, over_start:])
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             bias_list.append(ccd)
-        master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memlim, sigma_clip=True,
+        master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memory_limit, sigma_clip=True,
                                       sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
         if slit is True:
             master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
@@ -374,11 +372,12 @@ class Main:
     def reduce_nightflats(image_collection, twilight_evening, slit, prefix):
 
         # 40 min = time before twilight evening to be considered as begining of the night
-        time_before = (Time(twilight_evening)-TimeDelta(2400.0, format='sec')).isot
+        time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
 
         log.info('Reducing flat frames taken during the night...')
         df = image_collection.summary.to_pandas()
-        dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] > time_before) & (df['grating'] != '<NO GRATING>')]
+        dfobj = df['file'][
+            (df['obstype'] == 'FLAT') & (df['date-obs'] > time_before) & (df['grating'] != '<NO GRATING>')]
         nightflat_list = dfobj.tolist()
 
         if len(nightflat_list) > 0:
@@ -462,16 +461,18 @@ class Main:
         ic = ImageFileCollection(self.red_path)
 
         # Getting twilight time
-        twi_evening, twi_morning  = self.get_twilight_time(ic, observatory='Soar Telescope', long=Geodetic_Location[0],
-                                                           lat=Geodetic_Location[1], elevation=Geodetic_Location[2],
-                                                           timezone='UTC',
-                                                           description='Soar Telescope on Cerro Pachon, Chile')
+        twi_evening, twi_morning = self.get_twilight_time(ic, observatory='Soar Telescope',
+                                                          long=self.Geodetic_Location[0],
+                                                          lat=self.Geodetic_Location[1],
+                                                          elevation=self.Geodetic_Location[2],
+                                                          timezone='UTC',
+                                                          description='Soar Telescope on Cerro Pachon, Chile')
 
         # Create master_flats
-        self.create_daymaster_flat(ic, twi_evening, self.slit)
+        self.create_daymaster_flat(ic, twi_evening, self.slit, self.memlim)
 
         # Create master bias
-        self.create_master_bias(ic, self.slit)
+        self.create_master_bias(ic, self.slit, self.memlim)
 
         # Reduce Night Flat frames (if they exist)
         self.reduce_nightflats(ic, twi_evening, self.slit, prefix='z')

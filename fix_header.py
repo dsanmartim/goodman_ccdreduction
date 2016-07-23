@@ -1,12 +1,15 @@
-__author__ = 'davidsanm'
-
 import os
 import glob
 from astropy.io import fits
 from astropy import log
 
+__author__ = 'David Sanmartim'
+__date__ = '2016-07-15'
+__version__ = "1.0"
+__email__ = "dsanmartim@ctio.noao.edu"
 
-def fix_header_and_shape(self, input_path, output_path, prefix, overwrite=False):
+
+def fix_header_and_shape(input_path, output_path, prefix, overwrite=False):
     """
     Remove/Update some  inconvenient parameters in the header of the Goodman FITS
     files. Some of these parameters contain non-printable ASCII characters. The ouptut
