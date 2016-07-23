@@ -77,8 +77,10 @@ class Main:
         # Soar Geodetic Location
         Geodetic_Location = ['-70d44m01.11s', '-30d14m16.41s', 2748]
 
+        # Memory Limit to be used
         memlim = 16E9
 
+        # Paths
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
 
@@ -207,9 +209,10 @@ class Main:
 
         return slit_1, slit_2
 
-    def get_twilight_time(self, image_collection, observatory, long, lat, elevation, timezone, description):
+    @staticmethod
+    def get_twilight_time(image_collection, observatory, long, lat, elevation, timezone, description):
 
-        '''
+        """
         image_collection: ccdproc object
         observatory: str, observatory name (e.g. 'Soar Telescope',
         long: str, dms or deg
@@ -219,7 +222,7 @@ class Main:
         description: str, short description of the observatory
 
         return: str, twilight evening and twilinght morning (format 'YYYY-MM-DDT00:00:00.00')
-        '''
+        """
         soar_loc = EarthLocation.from_geodetic(long, lat, elevation * u.m, ellipsoid='WGS84')
 
         soar = Observer(name=observatory, location=soar_loc, timezone=timezone,
@@ -234,17 +237,15 @@ class Main:
         return twilight_evening, twilight_morning
 
     def get_daycal_flat(self, image_collection):
-
         """
         image_collection: ccdproc object
         return: list of flats
         """
-
         twi_eve, _ = self.get_twilight_time(image_collection, 'Soar Telescope', long=Geodetic_Location[0],
                                             lat=Geodetic_Location[1], elevation=Geodetic_Location[2],
                                             timezone='UTC', description='Soar Telescope on Cerro Pachon, Chile')
 
-        df = image_collection.ic.summary.to_pandas()
+        df = image_collection.summary.to_pandas()
         dfobj = df['file'][(df['date-obs'] < twi_eve) & (df['obstype'] == 'FLAT')]
         dayflat_list = dfobj.values.tolist()
 
@@ -359,12 +360,12 @@ class Main:
         # Testing if master_flats are not empty arrays
         if (not master_flat) is False:
             fccd = ccdproc.subtract_bias(master_flat, master_bias)
-            fccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+            fccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
             fccd.write(master_flat_name, clobber=True)
 
         if (not master_flat_nogrt) is False:
             ngccd = ccdproc.subtract_bias(master_flat_nogrt, master_bias)
-            ngccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+            ngccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
             ngccd.write(master_flat_nogrt_name, clobber=True)
 
         log.info('Done: a master bias have been created --> master_bias.fits')
@@ -381,6 +382,7 @@ class Main:
         df = image_collection.summary.to_pandas()
         dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] > time_before) & (df['grating'] != '<NO GRATING>')]
         nightflat_list = dfobj.tolist()
+
         if len(nightflat_list) > 0:
             for filename in sorted(nightflat_list):
                 log.info('Trimming and bias subtracting frame ' + filename + ' --> ' + prefix + filename)
@@ -409,7 +411,7 @@ class Main:
                     ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
                 ccd = ccdproc.subtract_bias(ccd, master_bias)
                 ccd = ccdproc.flat_correct(ccd, master_flat)
-                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+                ccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
                 ccd.write(prefix + filename, clobber=True)
             log.info('Done --> Arc frames have been reduced.')
             print('\n')
@@ -440,7 +442,7 @@ class Main:
                 log.info('Cosmic rays have been cleaned ' + prefix + filename + ' --> ' + 'c' + prefix + filename)
                 print('\n')
                 nccd = np.array(nccd, dtype=np.double) / float(ccd.header['GAIN'])
-                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+                ccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
                 ccd.header['HISTORY'] = "Cosmic rays rejected."
                 fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
             elif clean is False:
