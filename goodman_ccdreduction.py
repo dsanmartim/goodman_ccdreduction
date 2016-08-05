@@ -288,11 +288,12 @@ class Main:
         grtobj = grtobj.unique()
         grt_list = grtobj.tolist()
 
-        #grt_list = image_collection.values('grating', unique)
         dic_all_flats = {}
         for grt in sorted(grt_list):
-            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] < twilight_evening) &
-                               (df['grating'] == grt)]
+
+            #twilight_condition = df['date-obs'] < twilight_evening
+            twilight_condition = (Time(df['date-obs'].tolist()).jd < Time(twilight_evening).jd)
+            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['grating'] == grt) & (twilight_condition)]
             dic_all_flats[str(grt)] = dfobj.tolist()
 
         # Dict. for flats with grating and without gratintg
@@ -405,12 +406,13 @@ class Main:
     def reduce_nightflats(image_collection, twilight_evening, slit, prefix):
 
         # 40 min = time before twilight evening to be considered as begining of the night
-        time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
+        #time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
 
         log.info('Reducing flat frames taken during the night...')
         df = image_collection.summary.to_pandas()
-        dfobj = df['file'][
-            (df['obstype'] == 'FLAT') & (df['date-obs'] > time_before) & (df['grating'] != '<NO GRATING>')]
+
+        twilight_condition = (Time(df['date-obs'].tolist()).jd > Time(twilight_evening).jd)
+        dfobj = df['file'][(df['obstype'] == 'FLAT')  & (df['grating'] != '<NO GRATING>') & (twilight_condition)]
         nightflat_list = dfobj.tolist()
 
         if len(nightflat_list) > 0:
