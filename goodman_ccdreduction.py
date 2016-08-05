@@ -55,6 +55,9 @@ from scipy.interpolate import interp1d
 from astropy.coordinates import EarthLocation
 from astropy.time import Time, TimeDelta
 from astroplan import Observer
+from astroplan import download_IERS_A
+
+download_IERS_A()
 
 import ccdproc
 from ccdproc import ImageFileCollection
@@ -70,8 +73,15 @@ __email__ = "dsanmartim@ctio.noao.edu"
 class Main:
     def __init__(self):
 
-        # Soar Geodetic Location
+        # Soar Geodetic Location and other definitions
+        self.observatory = 'SOAR Telescope'
         self.Geodetic_Location = ['-70d44m01.11s', '-30d14m16.41s', 2748]
+        self.longitude = self.Geodetic_Location[0]
+        self.latitude = self.Geodetic_Location[1]
+        self.elevation = self.Geodetic_Location[2]
+        self.timezone = 'UTC'
+        self.description = 'Soar Telescope on Cerro Pachon, Chile'
+
 
         # Memory Limit to be used
         self.memlim = 16E9
@@ -129,7 +139,7 @@ class Main:
         Clean up directoy.
         """
         if os.path.exists(path):
-            for _file in glob.glob(os.path.join(path, '*')):
+            for _file in glob.glob(os.path.join(path, '*.fits')):
                 os.remove(_file)
 
     @staticmethod
@@ -169,9 +179,9 @@ class Main:
             hdr.add_history('Header and Shape fixed.')
             fits.writeto(os.path.join(output_path, '') + prefix + os.path.basename(_file), ccddata, hdr,
                          clobber=overwrite)
-            log.info('Keywords header of ' + os.path.basename(_file) + ' have been updated --> ' + prefix
+            log.info('Header of ' + os.path.basename(_file) + ' has been updated --> ' + prefix
                      + os.path.basename(_file))
-        log.info('Done: all keywords header have been updated.')
+        log.info('Done: All headers have been updated.')
         print('\n')
         return
 
@@ -206,7 +216,7 @@ class Main:
         return slit_1, slit_2
 
     @staticmethod
-    def get_twilight_time(image_collection, observatory, long, lat, elevation, timezone, description):
+    def get_twilight_time(image_collection, observatory, longitude, latitude, elevation, timezone, description):
 
         """
         image_collection: ccdproc object
@@ -219,30 +229,45 @@ class Main:
 
         return: str, twilight evening and twilinght morning (format 'YYYY-MM-DDT00:00:00.00')
         """
-        soar_loc = EarthLocation.from_geodetic(long, lat, elevation * u.m, ellipsoid='WGS84')
+        soar_loc = EarthLocation.from_geodetic(longitude, latitude, elevation * u.m, ellipsoid='WGS84')
 
-        soar = Observer(name=observatory, location=soar_loc, timezone=timezone,
-                        description=description)
+        soar = Observer(name=observatory, location=soar_loc, timezone=timezone, description=description)
 
         dateobs_list = image_collection.values('date-obs')
-        time_first_frame, time_last_frame = Time(min(dateobs_list)).isot, Time(max(dateobs_list)).isot
+        time_first_frame, time_last_frame = Time(min(dateobs_list)), Time(max(dateobs_list))
 
         twilight_evening = soar.twilight_evening_astronomical(Time(time_first_frame), which='nearest').isot
         twilight_morning = soar.twilight_morning_astronomical(Time(time_last_frame), which='nearest').isot
 
         return twilight_evening, twilight_morning
 
-    def get_daycal_flat(self, image_collection):
+    def get_night_flats(self, image_collection):
+
+        twi_eve, twi_mor = self.get_twilight_time(image_collection, self.observatory, self.longitude, self.latitude,
+                                                  self. elevation, self.timezone, self.description)
+
+        # 30 min = time before twilight evening to be considered as begining of the night
+        time_before = (Time(twi_eve) - TimeDelta(1800.0, format='sec')).isot
+        time_after = (Time(twi_mor) + TimeDelta(1800.0, format='sec')).isot
+
+        df = image_collection.summary.to_pandas()
+        dfobj = df['file'][(df['obstype'] == 'FLAT') &
+                           (Time(df['date-obs'].tolist()).jd > Time(twi_eve).jd) &
+                           (Time(df['date-obs'].tolist()).jd < Time(twi_mor).jd)]
+        night_flat_list = dfobj.values.tolist()
+
+        return night_flat_list
+
+    def get_day_flats(self, image_collection):
         """
         image_collection: ccdproc object
         return: list of flats
         """
-        twi_eve, _ = self.get_twilight_time(image_collection, 'Soar Telescope', long=self.Geodetic_Location[0],
-                                            lat=self.Geodetic_Location[1], elevation=self.Geodetic_Location[2],
-                                            timezone='UTC', description='Soar Telescope on Cerro Pachon, Chile')
+        twi_eve, twi_mor = self.get_twilight_time(image_collection, self.observatory, self.longitude, self.latitude,
+                                                  self. elevation, self.timezone, self.description)
 
         df = image_collection.summary.to_pandas()
-        dfobj = df['file'][(df['date-obs'] < twi_eve) & (df['obstype'] == 'FLAT')]
+        dfobj = df['file'][(Time(df['date-obs'].tolist()).jd < Time(twi_eve).jd) & (df['obstype'] == 'FLAT')]
         dayflat_list = dfobj.values.tolist()
 
         return dayflat_list
@@ -258,19 +283,23 @@ class Main:
 
         # Creating dict. of flats. The key values are expected to be: GRATIN_ID and '<NO GRATING>'
         # if there is flat taken w/o grating
-        grt_list = image_collection.values('grating', unique=True)
-        dic_all_flats = {}
-
         df = image_collection.summary.to_pandas()
+        grtobj = df['grating'][(df['obstype'] != 'BIAS')]
+        grtobj = grtobj.unique()
+        grt_list = grtobj.tolist()
+
+        #grt_list = image_collection.values('grating', unique)
+        dic_all_flats = {}
         for grt in sorted(grt_list):
-            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] < twilight_evening) & (df['grating'] == grt)]
+            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['date-obs'] < twilight_evening) &
+                               (df['grating'] == grt)]
             dic_all_flats[str(grt)] = dfobj.tolist()
 
         # Dict. for flats with grating and without gratintg
         dic_flat = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt != "<NO GRATING>"}
         dic_flatnogrt = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt == "<NO GRATING>"}
 
-        if len(dic_flat.values()) != 0:
+        if np.size(dic_flat.values()) > 0:
 
             for grt in dic_flat.keys():
 
@@ -280,7 +309,7 @@ class Main:
                     log.info(filename)
                     ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                     ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
-                flat_list.append(ccd)
+                    flat_list.append(ccd)
 
                 # combinning and trimming slit edges
                 master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit, sigma_clip=True,
@@ -300,7 +329,7 @@ class Main:
             log.info('Flat files have not been found.')
             print('\n')
 
-        if len(dic_flatnogrt.values()) != 0:
+        if np.size(dic_flatnogrt.values()) > 0:
 
             for grt in dic_flatnogrt.keys():
                 flatnogrt_list = []
@@ -309,11 +338,13 @@ class Main:
                     log.info(filename)
                     ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                     ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
-                flatnogrt_list.append(ccd)
+
+                    flatnogrt_list.append(ccd)
 
                 # combining and trimming slit edges
-                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                                    sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit,
+                                                    sigma_clip=True,
+                                                    sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
                 if slit is True:
                     master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
 
@@ -323,7 +354,7 @@ class Main:
                 log.info('Done: master flat (taken without grating) have been created --> master_flat_nogrt.fits')
                 print('\n')
         else:
-            log.info('Flat files (taken without grating) have not been found.')
+            log.info('Flat files taken without grating not found or not necessary')
             print('\n')
 
         return
@@ -342,9 +373,11 @@ class Main:
             # over_start += 10 / int(ccd.header['CCDSUM'][0])
             # ccd = ccdproc.subtract_overscan(ccd, median=True, overscan_axis=1, overscan=ccd[:, over_start:])
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
+
             bias_list.append(ccd)
+
         master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                      sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                                      sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
         if slit is True:
             master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
         else:
@@ -397,11 +430,11 @@ class Main:
     @staticmethod
     def reduce_arc(image_collection, slit, prefix):
 
-        log.info('Reduding Arc frames...')
+        log.info('Reducing Arc frames...')
         arc_list = image_collection.files_filtered(obstype='COMP')
         if len(arc_list) > 0:
             for filename in sorted(arc_list):
-                log.info('Reduding Arc frame ' + filename + ' --> ' + prefix + filename)
+                log.info('Reducing Arc frame ' + filename + ' --> ' + prefix + filename)
                 ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                 ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
                 if slit is True:
@@ -417,9 +450,9 @@ class Main:
     @staticmethod
     def reduce_sci(image_collection, slit, clean, prefix):
 
-        log.info('Reduding Sci/Std frames...')
+        log.info('Reducing Sci/Std frames...')
         for filename in image_collection.files_filtered(obstype='OBJECT'):
-            log.info('Reduding Sci/Std frame ' + filename + ' --> ' + prefix + filename)
+            log.info('Reducing Sci/Std frame ' + filename + ' --> ' + prefix + filename)
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             if slit is True:
@@ -429,9 +462,11 @@ class Main:
             # OBS: cosmic ray rejection is working pretty well by defining gain = 1. It's not working
             # when we use the real gain of the image. In this case the sky level changes by a factor
             # equal the gain.
+            # Function to determine the sigfrac and objlim: y = 0.16 * exptime + 1.2
+            value = 0.16 * float(ccd.header['EXPTIME']) + 1.2
             if clean is True:
                 log.info('Cleaning cosmic rays... ')
-                nccd, _ = ccdproc.cosmicray_lacosmic(ccd.data, sigclip=2.5, sigfrac=2.0, objlim=2.0,
+                nccd, _ = ccdproc.cosmicray_lacosmic(ccd.data, sigclip=2.5, sigfrac=value, objlim=value,
                                                      gain=float(ccd.header['GAIN']),
                                                      readnoise=float(ccd.header['RDNOISE']),
                                                      satlevel=np.inf, sepmed=True, fsmode='median',
@@ -461,21 +496,17 @@ class Main:
         ic = ImageFileCollection(self.red_path)
 
         # Getting twilight time
-        twi_evening, twi_morning = self.get_twilight_time(ic, observatory='Soar Telescope',
-                                                          long=self.Geodetic_Location[0],
-                                                          lat=self.Geodetic_Location[1],
-                                                          elevation=self.Geodetic_Location[2],
-                                                          timezone='UTC',
-                                                          description='Soar Telescope on Cerro Pachon, Chile')
+        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude, self. elevation,
+                                                  self.timezone, self.description)
 
         # Create master_flats
-        self.create_daymaster_flat(ic, twi_evening, self.slit, self.memlim)
+        self.create_daymaster_flat(ic, twi_eve, self.slit, self.memlim)
 
         # Create master bias
         self.create_master_bias(ic, self.slit, self.memlim)
 
         # Reduce Night Flat frames (if they exist)
-        self.reduce_nightflats(ic, twi_evening, self.slit, prefix='z')
+        self.reduce_nightflats(ic, twi_eve, self.slit, prefix='z')
 
         # Reduce Arc frames
         self.reduce_arc(ic, self.slit, prefix='fz')

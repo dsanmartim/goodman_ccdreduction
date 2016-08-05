@@ -1,4 +1,4 @@
-## PyGoodman CCD Reduction
+# PyGoodman CCD Reduction
 
 Warning: work is still in progress
 
@@ -14,8 +14,9 @@ High Throughput Spectrograph at SOAR Telescope. The script will make
  - COSMIC rays rejection (optional)
 
 Users can add a flag in order to clean up science data from cosmic rays, 
-which are removed by using the LACosmic code (P. G. van Dokkum, 2001, 
-PASP, 113, 1420).
+which are removed by using the modified version of the LACosmic code 
+(P. G. van Dokkum, 2001, PASP, 113, 1420) available through the astropy
+affiliated package ccdproc (and astrocrappy).
 
 ### Data Structure
 
