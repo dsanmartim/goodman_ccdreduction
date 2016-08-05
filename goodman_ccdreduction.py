@@ -57,8 +57,6 @@ from astropy.time import Time, TimeDelta
 from astroplan import Observer
 from astroplan import download_IERS_A
 
-download_IERS_A()
-
 import ccdproc
 from ccdproc import ImageFileCollection
 from ccdproc import CCDData
@@ -82,6 +80,8 @@ class Main:
         self.timezone = 'UTC'
         self.description = 'Soar Telescope on Cerro Pachon, Chile'
 
+        # ToDo Check if the file already exist befor download it
+        # download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
         self.memlim = 16E9
@@ -241,38 +241,42 @@ class Main:
 
         return twilight_evening, twilight_morning
 
-    def get_night_flats(self, image_collection):
-
-        twi_eve, twi_mor = self.get_twilight_time(image_collection, self.observatory, self.longitude, self.latitude,
-                                                  self. elevation, self.timezone, self.description)
-
-        # 30 min = time before twilight evening to be considered as begining of the night
-        time_before = (Time(twi_eve) - TimeDelta(1800.0, format='sec')).isot
-        time_after = (Time(twi_mor) + TimeDelta(1800.0, format='sec')).isot
+    @staticmethod
+    def get_night_flats(image_collection, twilight_evening, twilight_morning):
 
         df = image_collection.summary.to_pandas()
-        dfobj = df['file'][(df['obstype'] == 'FLAT') &
-                           (Time(df['date-obs'].tolist()).jd > Time(twi_eve).jd) &
-                           (Time(df['date-obs'].tolist()).jd < Time(twi_mor).jd)]
+
+        start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
+        end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
+
+        night_condition = ((Time(df['date-obs'].tolist()).jd < Time(start_night).jd) &
+                         (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
+
+        dfobj = df['file'][(df['obstype'] == 'FLAT') & night_condition]
         night_flat_list = dfobj.values.tolist()
 
         return night_flat_list
 
-    def get_day_flats(self, image_collection):
+    @staticmethod
+    def get_day_flats(image_collection, twilight_evening, twilight_morning):
         """
         image_collection: ccdproc object
         return: list of flats
         """
-        twi_eve, twi_mor = self.get_twilight_time(image_collection, self.observatory, self.longitude, self.latitude,
-                                                  self. elevation, self.timezone, self.description)
-
         df = image_collection.summary.to_pandas()
-        dfobj = df['file'][(Time(df['date-obs'].tolist()).jd < Time(twi_eve).jd) & (df['obstype'] == 'FLAT')]
+
+        start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
+        end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
+
+        day_condition = ((Time(df['date-obs'].tolist()).jd < Time(start_night).jd) |
+                         (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
+
+        dfobj = df['file'][(df['obstype'] == 'FLAT') & day_condition]
         dayflat_list = dfobj.values.tolist()
 
         return dayflat_list
 
-    def create_daymaster_flat(self, image_collection, twilight_evening, slit, memory_limit):
+    def create_daymaster_flat(self, image_collection, twilight_evening, twilight_morning, slit, memory_limit):
 
         global slit1, slit2, \
             master_flat, master_flat_nogrt, \
@@ -291,9 +295,13 @@ class Main:
         dic_all_flats = {}
         for grt in sorted(grt_list):
 
-            #twilight_condition = df['date-obs'] < twilight_evening
-            twilight_condition = (Time(df['date-obs'].tolist()).jd < Time(twilight_evening).jd)
-            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['grating'] == grt) & (twilight_condition)]
+            start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
+            end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
+
+            day_condition = ((Time(df['date-obs'].tolist()).jd < Time(start_night).jd) |
+                             (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
+
+            dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['grating'] == grt) & day_condition]
             dic_all_flats[str(grt)] = dfobj.tolist()
 
         # Dict. for flats with grating and without gratintg
@@ -403,16 +411,22 @@ class Main:
         return
 
     @staticmethod
-    def reduce_nightflats(image_collection, twilight_evening, slit, prefix):
+    def reduce_nightflats(image_collection, twilight_evening, twilight_morning, slit, prefix):
 
         # 40 min = time before twilight evening to be considered as begining of the night
-        #time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
+        # time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
 
         log.info('Reducing flat frames taken during the night...')
         df = image_collection.summary.to_pandas()
 
-        twilight_condition = (Time(df['date-obs'].tolist()).jd > Time(twilight_evening).jd)
-        dfobj = df['file'][(df['obstype'] == 'FLAT')  & (df['grating'] != '<NO GRATING>') & (twilight_condition)]
+        # Night starts/ends 30min beforre/after twilight evening/morning
+        start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
+        end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
+
+        night_condition = ((Time(df['date-obs'].tolist()).jd > Time(start_night).jd) &
+                           (Time(df['date-obs'].tolist()).jd < Time(end_night).jd))
+
+        dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['grating'] != '<NO GRATING>') & night_condition]
         nightflat_list = dfobj.tolist()
 
         if len(nightflat_list) > 0:
@@ -433,7 +447,9 @@ class Main:
     def reduce_arc(image_collection, slit, prefix):
 
         log.info('Reducing Arc frames...')
+
         arc_list = image_collection.files_filtered(obstype='COMP')
+
         if len(arc_list) > 0:
             for filename in sorted(arc_list):
                 log.info('Reducing Arc frame ' + filename + ' --> ' + prefix + filename)
@@ -498,17 +514,16 @@ class Main:
         ic = ImageFileCollection(self.red_path)
 
         # Getting twilight time
-        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude, self. elevation,
+        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude, self.elevation,
                                                   self.timezone, self.description)
-
         # Create master_flats
-        self.create_daymaster_flat(ic, twi_eve, self.slit, self.memlim)
+        self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
 
         # Create master bias
         self.create_master_bias(ic, self.slit, self.memlim)
 
         # Reduce Night Flat frames (if they exist)
-        self.reduce_nightflats(ic, twi_eve, self.slit, prefix='z')
+        self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
 
         # Reduce Arc frames
         self.reduce_arc(ic, self.slit, prefix='fz')
