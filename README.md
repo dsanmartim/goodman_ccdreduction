@@ -65,3 +65,9 @@ If you have any doubt or question, please contact David Sanmartim
    
 July 2016
 
+### Notes: By Simon
+
+Install astroplan currently on **heavy development** might requiere a lot
+of maintenance
+
+By installing astroplan, it downgrades numpy
