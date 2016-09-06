@@ -1,45 +1,57 @@
 # -*- coding: utf8 -*-
 
 """
-    ## PyGoodman CCD Reduction
+# PyGoodman CCD Reduction - CCD reductions for Goodman spectroscopic data.
 
-    Goodman CCDRed performs ccd reductions for Goodman spectroscopic data.
+This script performs CCD reduction for long-slit spectra taken with the
+GoodmanHigh Throughput Spectrograph at SOAR Telescope. The script will make
+(in order):
 
-    This script performs CCD reduction for spectra taken with the Goodman
-    High Throughput Spectrograph at SOAR Telescope. The script will make
-    (in order):
+- BIAS subtraction
+- TRIMMING including slit edges identification
+- FLAT correction
+- COSMIC rays rejection (optional)
 
-    - BIAS subtraction
-    - TRIMMING including slit edges identification
-    - FLAT correction
-    - COSMIC rays rejection (optional)
+Users can add a flag in order to clean up science data from cosmic rays, which
+are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420).
 
-    Users can add a flag in order to clean up science data from cosmic rays, which
-    are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420)
+## I/O Data Structure
 
-    ### Data Structure
+This script was designed to make CCD reduction for any spectrograph configuration,
+but the input directory should contain only an unique spectral configuration (binning,
+grating, slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the
+following frames:
 
-    Documentations for specific functions of the code can be found directly
-    in the corresponding function. (To be done...)
+- BIAS frames
+- FLAT frames  (Flats taken between science exposures will be trimmed and bias subtracted.)
+- ARC frames   (data from focus sequence will not be reduced)
+- SCIENCE and/or STANDARD frames
 
-    This script was designed to make CCD reduction for any spectral configuration, but
-    the input dir must contains only an unique spectral configuration (binning, grating,
-    slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following
-    frames:
+The output data has the same filename of the input data, but with a prefix "fzh". It means
+the data has its header updated, bias subtracted and flat corrected. The prefix "c_fzh"
+means that cosmic ray correction was applied.
 
-    - BIAS frames
-    - FLAT frames  (Flats taken between science exposures will be trimmed and bias subtracted.)
-    - ARC frames   (data from focus sequence will not be reduced)
-    - SCIENCE and/or STANDARD frames
+It can be be executed in terminal running:
 
-    # ToDo
+    $ python goodman_ccdreduction.py [options] raw_path red_path
 
-    - Consider internal illumination correction
+More information abotu the options and how to use it can be otained by using...
 
-    David Sanmartim (dsanmartim at ctio.noao.edu, dsanmartim at gemini.edu)
-    July 2016
+    $ python goodman_ccdreduction.py --help
+or
+    $ python goodman_ccdreduction.py -h
 
-    Thanks to Bruno Quint for all comments and helping.
+Documentation for specific functions of the code can be found directly in the corresponding
+function. (To be done...)
+
+#ToDo
+
+- Consider internal illumination correction
+
+David Sanmartim (dsanmartim at gemini.edu)
+August 2016
+
+Thanks to Bruno Quint for all comments and helping.
 
 """
 
@@ -55,7 +67,7 @@ from scipy.interpolate import interp1d
 from astropy.coordinates import EarthLocation
 from astropy.time import Time, TimeDelta
 from astroplan import Observer
-from astroplan import download_IERS_A
+from astroplan import get_IERS_A_or_workaround,download_IERS_A
 
 import ccdproc
 from ccdproc import ImageFileCollection
@@ -69,6 +81,7 @@ __email__ = "dsanmartim@ctio.noao.edu"
 
 
 class Main:
+
     def __init__(self):
 
         # Soar Geodetic Location and other definitions
@@ -81,14 +94,20 @@ class Main:
         self.description = 'Soar Telescope on Cerro Pachon, Chile'
 
         # ToDo Check if the file already exist befor download it
-        # download_IERS_A(show_progress=True)
+        # if get_IERS_A_or_workaround() is None:
+        #    download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
         self.memlim = 16E9
 
-        # Paths
+        # Taking the args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
+
+        if self.raw_path == self.red_path:
+            raise ValueError('raw_path may not be equal to red_path')
+        else:
+            pass
 
         self.clean = args.clean
         self.slit = args.slit
@@ -104,6 +123,22 @@ class Main:
 
     @staticmethod
     def fit_spline3(y, order=3, nsum=5):
+        """Fit a cubib spline to an 1D-array of N pixels.
+
+        Args:
+            y (1D array like): A 1-D array of monotonically increasing real values
+            order (int) : order of t
+            nsum (ins)  : number of array elements to be avareged
+
+        Returns: It returns a function
+
+        Examples:
+
+        f = fit_spline3(y, order=5, nsum=2)
+        x = np.arange(0,1500,1)
+        ysmooth = f(x)
+
+        """
         y_resampled = [np.median(y[i:i + nsum]) for i in range(0, len(y) - len(y) % nsum, nsum)]
         x_resampled = np.linspace(0, len(y), len(y_resampled))
 
@@ -116,6 +151,16 @@ class Main:
     # Local Minima and Maxima
     @staticmethod
     def local_minmax(data, nmin=1, nmax=1):
+        """Find local minima-maxima points for a set of non-noisy data
+
+        Args:
+            data (1D array like): 1D array of non-noisy data
+            nmin (int): number of local minina to be find
+            nmax (int): number of local maxima to be find
+
+        Returns: It returns a function
+
+        """
 
         # Identifying indices of local minima-maxima points
         id_min = (np.gradient(np.sign(np.gradient(data))) > 0).nonzero()[0]  # index of local min
@@ -136,7 +181,7 @@ class Main:
     @staticmethod
     def clean_path(path):
         """
-        Clean up directoy.
+        Clean up FIST file in a directoy. It's not recursive
         """
         if os.path.exists(path):
             for _file in glob.glob(os.path.join(path, '*.fits')):
@@ -144,11 +189,21 @@ class Main:
 
     @staticmethod
     def fix_header_and_shape(input_path, output_path, prefix, overwrite=False):
-        """
-        Remove/Update some  inconvenient parameters in the header of the Goodman FITS
+
+        """Remove/Update some  inconvenient parameters in the header of the Goodman FITS
         files. Some of these parameters contain non-printable ASCII characters. The ouptut
         files are created in the output_path. Also convert fits from 3D [1,X,Y] to 2D [X,Y].
+
+        Args:
+            input_path (str): Location of input data.
+            output_path (str): Location of output data.
+            prefix (str): Prefix to be added in the filename of output data
+            overwrite (bool, optional): If true it it overwrite existing data
+
+        Returns:
+            Fits file with header and shape fixed.
         """
+
         for _file in sorted(glob.glob(os.path.join(input_path, '*.fits'))):
 
             ccddata, hdr = fits.getdata(_file, header=True, ignore_missing_end=True)
@@ -186,11 +241,21 @@ class Main:
         return
 
     def find_slitedge(self, ccddata):
+        """Find slit edge by inspecting signal variation in the spatial direction
+        of flat frames. The spatial direction is assumed to be axis=0 (or y axis
+        in IRAF convention) and data are divided in two regions in which we are
+        looking for slit edges.
 
+        Args:
+            ccddata (ccdproc.CCDData): The actual data contained in this ccdproc.CCDData object
+
+        Returns (int):
+            Pixel of slit edge 1 and slit edge 2 (bottom to top of the flat image).
+        """
         # Reading and Collapsing flat in the dispersion direction
         flat_collapsed = np.sum(ccddata, axis=1) / ccddata.shape[1]
 
-        # Excluding first pixels in the spatial direction
+        # Excluding 3 first pixels in the spatial direction
         cut = 3
         c_flat = flat_collapsed[cut:-cut]
         c_lines = np.arange(0, c_flat.size, 1)
@@ -217,8 +282,21 @@ class Main:
 
     @staticmethod
     def get_twilight_time(image_collection, observatory, longitude, latitude, elevation, timezone, description):
-
         """
+
+        Args:
+            image_collection:
+            observatory:
+            longitude:
+            latitude:
+            elevation:
+            timezone:
+            description:
+
+        Returns:
+
+        Old...
+
         image_collection: ccdproc object
         observatory: str, observatory name (e.g. 'Soar Telescope',
         long: str, dms or deg
@@ -243,6 +321,17 @@ class Main:
 
     @staticmethod
     def get_night_flats(image_collection, twilight_evening, twilight_morning):
+
+        """
+
+        Args:
+            image_collection:
+            twilight_evening:
+            twilight_morning:
+
+        Returns:
+
+        """
 
         df = image_collection.summary.to_pandas()
 
@@ -413,10 +502,8 @@ class Main:
     @staticmethod
     def reduce_nightflats(image_collection, twilight_evening, twilight_morning, slit, prefix):
 
-        # 40 min = time before twilight evening to be considered as begining of the night
-        # time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
-
         log.info('Reducing flat frames taken during the night...')
+
         df = image_collection.summary.to_pandas()
 
         # Night starts/ends 30min beforre/after twilight evening/morning
@@ -514,8 +601,8 @@ class Main:
         ic = ImageFileCollection(self.red_path)
 
         # Getting twilight time
-        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude, self.elevation,
-                                                  self.timezone, self.description)
+        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude,
+                                                  self.elevation, self.timezone, self.description)
         # Create master_flats
         self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
 
@@ -533,11 +620,11 @@ class Main:
 
         return
 
-
 if __name__ == '__main__':
 
     # Parsing Arguments ---
-    parser = argparse.ArgumentParser(description="Goodman - CCD Data Reduction.")
+    parser = argparse.ArgumentParser(description="PyGoodman CCD Reduction - CCD reductions for "
+                                                 "Goodman spectroscopic data")
 
     parser.add_argument('-c', '--clean', action='store_true',
                         help="Clean cosmic rays from science data.")
