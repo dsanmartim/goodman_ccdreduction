@@ -63,8 +63,8 @@ or
 
 If you have any doubt or question, please contact David Sanmartim 
 
-<b>dsanmartim at ctio.noao.edud</b> (before Set 1st, 2016 ) 
-<b>dsanmartim at gemini.edu</b> (after Set 1st, 2016)
+<b>davidsanm at gmail.com</b>
+<b>dsanmartim at gemini.edu</b>
    
 July 2016
 
