@@ -20,7 +20,7 @@ rays, which are removed by using the modified version of the LACosmic
 code (P. G. van Dokkum, 2001, PASP, 113, 1420) available through the
 astropy affiliated package ccdproc (and astrocrappy).
 
-### Data Structure
+### I/O Data Structure
 
 This script was designed to make CCD reduction for any spectrograph
 configuration, but the input directory should contain only an unique
