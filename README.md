@@ -56,7 +56,7 @@ or
 ### ToDo (Short List)
 
 - Consider internal illumination correction (in fact this will not be done)
-- Disable the flat correction if there is a no grating flat
+- Disable the flat correction if there isn't a master no_grating flat
 - Automatically determine the best input parameters for LACOSMIC
 
 ### Suggestions and Questions
