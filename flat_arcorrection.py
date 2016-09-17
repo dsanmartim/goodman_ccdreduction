@@ -10,6 +10,7 @@ from scipy.interpolate import interp1d
 import multiprocessing
 from multiprocessing import Pool
 
+
 def fitting(x, y, function='Legendre', order=41):
     # prepare for masking arrays - 'conventional' arrays won't do it
     # data = np.ma.array(data)
@@ -72,26 +73,42 @@ def sigma_clipping(data, low_rej=2.5, high_rej=2.5):
     return good_mask, bad_mask
 
 
-def cor_flat(flatname, function='Chebychev', order=55, clipping='sigma_clipping', niter=0,
-             low_rej=2.5, high_rej=2.5):
-
+def cor_flat(flatname, function='Chebychev', order=55, clipping='sigma_clipping', niter=1,
+             low_rej=5.0, high_rej=2.5):
     # Input and trimming data
     ccddata, hdr = fits.getdata(flatname, header=True, ignore_missing_end=True)
     axis0, axis1 = np.size(ccddata, axis=0), np.size(ccddata, axis=1)
 
-    ccdfit = np.empty([axis0,axis1])
-    #ccdfit = np.zeros(axis1)
+    ccdfit = np.empty([axis0, axis1])
+    # ccdfit = np.zeros(axis1)
 
     # Collapsing 2D image into a single vector (a big aperture of all lines)
     xpix = np.arange(0, np.size(ccddata, axis=1), 1)
-    #for j in np.arange(0, np.size(ccddata, axis=0)):
-    for j in np.arange(600,650,1):
+    for j in np.arange(0, np.size(ccddata, axis=0)):
+    #for j in np.arange(977, 1300, 1):
 
-        spec = ccddata[j,:]
+        spec = ccddata[j, :]
 
         # Fitting function to the spectrum of the flat before any clipping
-        fit, chi2_dof = fitting(xpix, spec, function=function, order=order)
+        # fit, chi2_dof = fitting(xpix, spec, function=function, order=order)
+        chi2_vet = np.empty(order)
+        fit_vet = np.empty([order, len(spec)])
+        for i in np.arange(0, order, 1):
+            fit, chi2_dof = fitting(xpix, spec, function=function, order=i)
+            fit_vet[i, :] = fit
+            chi2_vet[i] = chi2_dof
 
+        # Considering min of chi2
+        index = int(np.mean(np.where(chi2_vet == min(chi2_vet))))
+        order = index + 1
+        fit = fit_vet[index, :]
+
+        Plot = False
+        if Plot is True:
+            xorder = np.arange(1, len(chi2_vet)+1, 1)
+            plt.plot(xorder, chi2_vet, label='Res')
+            plt.legend(loc='best')
+            plt.show()
         # Residual
         residual = spec - fit
 
@@ -114,17 +131,16 @@ def cor_flat(flatname, function='Chebychev', order=55, clipping='sigma_clipping'
                 fit, chi2_dof = fitting(xpix, spec, function=function, order=order)
 
                 # print fit - firstfit
-                residual = spec - fit\
+                residual = spec - fit
+        print 'Line: %s' % (j + 1)
 
-        print 'Line: %s' %(j+1)
-
-        #newrow = np.asarray(fit)
-        #ccdfit = np.vstack([ccdfit, newrow])
+        # newrow = np.asarray(fit)
+        # ccdfit = np.vstack([ccdfit, newrow])
 
         ccdfit[j, :] = fit
 
         # Plotting things
-        plot = True
+        plot = False
         if plot is True:
             plt.figure()
             plt.clf()
@@ -156,25 +172,25 @@ def cor_flat(flatname, function='Chebychev', order=55, clipping='sigma_clipping'
 
             plt.show()
 
-    #ccdfit = ccdfit[1:,:]
+    # ccdfit = ccdfit[1:,:]
 
-    dir = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/'
-    fits.writeto(dir+'teste.fits', ccdfit, hdr, clobber=True)
+    dir = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/TST/'
+    fits.writeto(dir + 'c_master_flat_600.fits', ccdfit, hdr, clobber=True)
+
 
 if __name__ == '__main__':
 
-
-    #flat = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/TST/master_flat_600.fits'
-    #flat_nogrt = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/master_flat_nogrt.fits'
-    #cor_flat(flat, function='Legendre', order=41, clipping='sigma_clipping', niter=1, low_rej=2.5, high_rej=2.5)
+    # flat = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/TST/master_flat_600.fits'
+    # flat_nogrt = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/master_flat_nogrt.fits'
+    # cor_flat(flat, function='Legendre', order=41, clipping='sigma_clipping', niter=1, low_rej=2.5, high_rej=2.5)
 
     flat = '/home/davidsanm/PyCharmProjects/GoodmanDataReduction/2016-03-20/RED/TST/master_flat_600.fits'
-    function='Legendre'
+    function = 'Legendre'
     order = 35
-    clipping='sigma_clipping'
-    niter=1
-    low_rej=2.5
-    high_rej=1.5
+    clipping = 'sigma_clipping'
+    niter = 1
+    low_rej = 2.5
+    high_rej = 1.5
     input_params = flat
 
     try:
@@ -200,10 +216,3 @@ user	8m1.631s
 sys	27m15.178s
 
 '''
-
-
-
-
-
-
-

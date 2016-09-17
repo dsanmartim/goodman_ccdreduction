@@ -4,11 +4,11 @@
 # PyGoodman CCD Reduction - CCD reductions for Goodman spectroscopic data.
 
 This script performs CCD reduction for long-slit spectra taken with the
-GoodmanHigh Throughput Spectrograph at SOAR Telescope. The script will make
-(in order):
+Goodman High Throughput Spectrograph at SOAR Telescope. The script will
+make (in order):
 
 - BIAS subtraction
-- TRIMMING including slit edges identification
+- TRIMMING including slit edges identification (it does not work for MOS spectroscopy)
 - FLAT correction
 - COSMIC rays rejection (optional)
 
@@ -27,9 +27,12 @@ following frames:
 - ARC frames   (data from focus sequence will not be reduced)
 - SCIENCE and/or STANDARD frames
 
-The output data has the same filename of the input data, but with a prefix "fzh". It means
-the data has its header updated, bias subtracted and flat corrected. The prefix "c_fzh"
-means that cosmic ray correction was applied.
+Please, inspect you calibration and throw it out the bad ones. The output data has the same
+filename of the input data, but with a prefix "fzh". It means data has its header updated (h),
+bias subtracted (z) and flat corrected (f). The prefix "c_fzh" means that cosmic ray correction
+was applied.
+
+## How to use it...
 
 It can be be executed in terminal running:
 
@@ -46,7 +49,9 @@ function. (To be done...)
 
 #ToDo
 
-- Consider internal illumination correction
+- Consider internal illumination correction (in fact this will not be done)
+- Disable the flat correction if there is a no grating flat
+- Automatically determine the best input parameters for LACOSMIC
 
 David Sanmartim (dsanmartim at gemini.edu)
 August 2016
@@ -100,7 +105,7 @@ class Main:
         # Memory Limit to be used
         self.memlim = 16E9
 
-        # Taking the args from argparse method
+        # Taking some args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
 
@@ -109,6 +114,7 @@ class Main:
         else:
             pass
 
+        # More args from argparse
         self.clean = args.clean
         self.slit = args.slit
 
@@ -366,6 +372,18 @@ class Main:
         return dayflat_list
 
     def create_daymaster_flat(self, image_collection, twilight_evening, twilight_morning, slit, memory_limit):
+        """
+
+        Args:
+            image_collection:
+            twilight_evening:
+            twilight_morning:
+            slit:
+            memory_limit:
+
+        Returns:
+
+        """
 
         global slit1, slit2, \
             master_flat, master_flat_nogrt, \
