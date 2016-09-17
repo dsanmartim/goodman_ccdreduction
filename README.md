@@ -63,7 +63,8 @@ or
 
 If you have any doubt or question, please contact David Sanmartim 
 
-<b>davidsanm at gmail.com</b><br>
+<b>davidsanm at gmail.com</b>
+<br>
 <b>dsanmartim at gemini.edu</b>
    
 July 2016
