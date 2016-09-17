@@ -67,5 +67,5 @@ If you have any doubt or question, please contact David Sanmartim
 <br>
 <b>dsanmartim at gemini.edu</b>
    
-July 2016
+Set 2016
 
