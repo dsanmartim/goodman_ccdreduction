@@ -83,6 +83,7 @@ __author__ = 'David Sanmartim'
 __date__ = '2016-07-15'
 __version__ = "0.1"
 __email__ = "dsanmartim@ctio.noao.edu"
+__maintainer__ = "Simon Torres"
 
 
 class Main:
@@ -98,12 +99,13 @@ class Main:
         self.timezone = 'UTC'
         self.description = 'Soar Telescope on Cerro Pachon, Chile'
 
-        # ToDo Check if the file already exist befor download it
+        # ToDo Check if the file already exist before download it
         # if get_IERS_A_or_workaround() is None:
         #    download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
-        self.memlim = 16E9
+        # self.memlim = 16E9
+        self.memlim = 5E6
 
         # Taking some args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
@@ -213,22 +215,25 @@ class Main:
         for _file in sorted(glob.glob(os.path.join(input_path, '*.fits'))):
 
             ccddata, hdr = fits.getdata(_file, header=True, ignore_missing_end=True)
-            # 3D to 2D
-            ccddata = ccddata[0]
-            # keywords to remove
-            key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3', 'INSTRUME']
 
-            # Keyword to be changed (3 --> 2)
-            hdr['N_PARAM'] -= len(key_list_to_remove)
-            hdr['NAXIS'] = 2
+            if not args.red_camera:
+                # 3D to 2D
+                ccddata = ccddata[0]
+                # keywords to remove
+                key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3', 'INSTRUME']
 
-            # Specific keywords to be removed
-            for key in key_list_to_remove:
-                try:
-                    if (key in hdr) is True:
-                        hdr.remove(keyword=key)
-                except KeyError:
-                    pass
+                # Keyword to be changed (3 --> 2)
+                hdr['N_PARAM'] -= len(key_list_to_remove)
+                hdr['NAXIS'] = 2
+
+                # Specific keywords to be removed
+                for key in key_list_to_remove:
+                    try:
+                        if (key in hdr) is True:
+                            hdr.remove(keyword=key)
+                    except KeyError:
+                        pass
+
 
             # Removing duplicated keywords
             key_list = []
@@ -655,6 +660,9 @@ if __name__ == '__main__':
 
     parser.add_argument('red_path', metavar='red_path', type=str, nargs=1,
                         help="Full path to reduced data (e.g /home/jamesbond/soardata/RED/).")
+
+    parser.add_argument('--red-camera', action='store_true', default=False, dest='red_camera',
+                        help='Enables Goodman Red Camera')
 
     args = parser.parse_args()
 
