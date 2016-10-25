@@ -99,13 +99,23 @@ class Main:
         self.timezone = 'UTC'
         self.description = 'Soar Telescope on Cerro Pachon, Chile'
 
+        # Set variables used globally
+        self.master_bias = None
+        self.slit1 = None
+        self.slit2 = None
+        self.master_flat = None
+        self.master_flat_nogrt = None
+        self.master_flat_name = None
+        self.master_flat_nogrt_name = None
+
+
         # ToDo Check if the file already exist before download it
         # if get_IERS_A_or_workaround() is None:
         #    download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
         # self.memlim = 16E9
-        self.memlim = 5E6
+        self.memlim = 1E7
 
         # Taking some args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
@@ -128,6 +138,40 @@ class Main:
         # About warnings
         warnings.filterwarnings('ignore')
         log.propagate = False
+
+    def __call__(self, *args, **kwargs):
+
+        # cleaning up the reduction dir
+        self.clean_path(self.red_path)
+
+        # Fixing header and shape of raw data
+        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
+
+        # Create image file collection for raw data
+        ic = ImageFileCollection(self.red_path)
+
+        # Getting twilight time
+        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude,
+                                                  self.elevation, self.timezone, self.description)
+        # Create master_flats
+        self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
+
+        # Create master bias
+        if len(ic.files_filtered(obstype='BIAS')) > 0:
+            self.create_master_bias(ic, self.slit, self.memlim)
+        else:
+            log.info('No bias detected')
+
+        # Reduce Night Flat frames (if they exist)
+        self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
+
+        # Reduce Arc frames
+        self.reduce_arc(ic, self.slit, prefix='fz')
+
+        # Reduce Sci frames
+        self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
+
+        return
 
     @staticmethod
     def fit_spline3(y, order=3, nsum=5):
@@ -390,12 +434,8 @@ class Main:
 
         """
 
-        global slit1, slit2, \
-            master_flat, master_flat_nogrt, \
-            master_flat_name, master_flat_nogrt_name
-
-        master_flat = []
-        master_flat_nogrt = []
+        self.master_flat = []
+        self.master_flat_nogrt = []
 
         # Creating dict. of flats. The key values are expected to be: GRATIN_ID and '<NO GRATING>'
         # if there is flat taken w/o grating
@@ -416,7 +456,7 @@ class Main:
             dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['grating'] == grt) & day_condition]
             dic_all_flats[str(grt)] = dfobj.tolist()
 
-        # Dict. for flats with grating and without gratintg
+        # Dict. for flats with grating and without grating
         dic_flat = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt != "<NO GRATING>"}
         dic_flatnogrt = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt == "<NO GRATING>"}
 
@@ -433,15 +473,20 @@ class Main:
                     flat_list.append(ccd)
 
                 # combinning and trimming slit edges
-                master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                              sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                print('Flat list length: %s' % len(flat_list))
+                if len(flat_list) >= 1:
+                    self.master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit, sigma_clip=True,
+                                                  sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                else:
+                    log.info('Flat list empty')
+                    return
                 if slit is True:
                     print('\n Finding slit edges... \n')
-                    slit1, slit2 = self.find_slitedge(master_flat)
-                    master_flat = ccdproc.trim_image(master_flat[slit1:slit2, :])
+                    self.slit1, self.slit2 = self.find_slitedge(self.master_flat)
+                    self.master_flat = ccdproc.trim_image(self.master_flat[self.slit1:self.slit2, :])
 
-                master_flat_name = 'master_flat_' + grt[5:] + '.fits'
-                master_flat.write(master_flat_name, clobber=True)
+                self.master_flat_name = 'master_flat_' + grt[5:] + '.fits'
+                self.master_flat.write(self.master_flat_name, clobber=True)
 
                 log.info('Done: master flat has been created --> ' + 'master_flat_' + grt[5:] + '.fits')
                 print('\n')
@@ -463,14 +508,14 @@ class Main:
                     flatnogrt_list.append(ccd)
 
                 # combining and trimming slit edges
-                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit,
+                self.master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit,
                                                     sigma_clip=True,
                                                     sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
                 if slit is True:
-                    master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
+                    self.master_flat_nogrt = ccdproc.trim_image(self.master_flat_nogrt[self.slit1:self.slit2, :])
 
-                master_flat_nogrt_name = 'master_flat_nogrt.fits'
-                master_flat_nogrt.write(master_flat_nogrt_name, clobber=True)
+                self.master_flat_nogrt_name = 'master_flat_nogrt.fits'
+                self.master_flat_nogrt.write(self.master_flat_nogrt_name, clobber=True)
 
                 log.info('Done: master flat (taken without grating) have been created --> master_flat_nogrt.fits')
                 print('\n')
@@ -480,10 +525,8 @@ class Main:
 
         return
 
-    @staticmethod
-    def create_master_bias(image_collection, slit, memory_limit):
+    def create_master_bias(self, image_collection, slit, memory_limit):
 
-        global master_bias
         bias_list = []
         log.info('Combining and trimming bias frames:')
         for filename in image_collection.files_filtered(obstype='BIAS'):
@@ -497,33 +540,32 @@ class Main:
 
             bias_list.append(ccd)
 
-        master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                      sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
+        self.master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memory_limit, sigma_clip=True,
+                                           sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
         if slit is True:
-            master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
-        else:
-            master_bias = master_bias
-        master_bias.header['HISTORY'] = "Trimmed."
-        master_bias.write('master_bias.fits', clobber=True)
+            self.master_bias = ccdproc.trim_image(self.master_bias[self.slit1:self.slit2, :])
+        # else:
+            # self.master_bias = self.master_bias
+        self.master_bias.header['HISTORY'] = "Trimmed."
+        self.master_bias.write('master_bias.fits', clobber=True)
 
         # Now I obtained bias... subtracting bias from master flat
         # Testing if master_flats are not empty arrays
-        if (not master_flat) is False:
-            fccd = ccdproc.subtract_bias(master_flat, master_bias)
+        if (not self.master_flat) is False:
+            fccd = ccdproc.subtract_bias(self.master_flat, self.master_bias)
             fccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
-            fccd.write(master_flat_name, clobber=True)
+            fccd.write(self.master_flat_name, clobber=True)
 
-        if (not master_flat_nogrt) is False:
-            ngccd = ccdproc.subtract_bias(master_flat_nogrt, master_bias)
+        if (not self.master_flat_nogrt) is False:
+            ngccd = ccdproc.subtract_bias(self.master_flat_nogrt, self.master_bias)
             ngccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
-            ngccd.write(master_flat_nogrt_name, clobber=True)
+            ngccd.write(self.master_flat_nogrt_name, clobber=True)
 
         log.info('Done: a master bias have been created --> master_bias.fits')
         print('\n')
         return
 
-    @staticmethod
-    def reduce_nightflats(image_collection, twilight_evening, twilight_morning, slit, prefix):
+    def reduce_nightflats(self, image_collection, twilight_evening, twilight_morning, slit, prefix):
 
         log.info('Reducing flat frames taken during the night...')
 
@@ -544,17 +586,21 @@ class Main:
                 log.info('Trimming and bias subtracting frame ' + filename + ' --> ' + prefix + filename)
                 ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                 ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
+                ccd.header['HISTORY'] = "Trimmed"
                 if slit is True:
-                    ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-                ccd = ccdproc.subtract_bias(ccd, master_bias)
-                ccd.header['HISTORY'] = "Trimmed. Bias subtracted."
+                    ccd = ccdproc.trim_image(ccd[self.slit1:self.slit2, :])
+                if self.master_bias is not None:
+                    ccd = ccdproc.subtract_bias(ccd, self.master_bias)
+                    ccd.header['HISTORY'] = "Bias subtracted."
+                else:
+                    ccd.header['HISTORY'] = "Bias NOT subtracted."
+                    log.warning('No bias subtraction!')
                 ccd.write(prefix + filename, clobber=True)
             log.info('Done --> Night flat frames have been reduced.')
             print('\n')
         return
 
-    @staticmethod
-    def reduce_arc(image_collection, slit, prefix):
+    def reduce_arc(self, image_collection, slit, prefix):
 
         log.info('Reducing Arc frames...')
 
@@ -566,17 +612,21 @@ class Main:
                 ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                 ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
                 if slit is True:
-                    ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-                ccd = ccdproc.subtract_bias(ccd, master_bias)
-                ccd = ccdproc.flat_correct(ccd, master_flat)
-                ccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
+                    ccd = ccdproc.trim_image(ccd[self.slit1:self.slit2, :])
+                if self.master_bias is not None:
+                    ccd = ccdproc.subtract_bias(ccd, self.master_bias)
+                    ccd.header['HISTORY'] = "Bias subtracted."
+                else:
+                    ccd.header['HISTORY'] = "Bias NOT subtracted."
+                    log.warning('No bias subtraction!')
+                ccd = ccdproc.flat_correct(ccd, self.master_flat)
+                ccd.header['HISTORY'] = "Trimmed. Flat corrected."
                 ccd.write(prefix + filename, clobber=True)
             log.info('Done --> Arc frames have been reduced.')
             print('\n')
         return
 
-    @staticmethod
-    def reduce_sci(image_collection, slit, clean, prefix):
+    def reduce_sci(self, image_collection, slit, clean, prefix):
 
         log.info('Reducing Sci/Std frames...')
         for filename in image_collection.files_filtered(obstype='OBJECT'):
@@ -584,9 +634,14 @@ class Main:
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             if slit is True:
-                ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-            ccd = ccdproc.subtract_bias(ccd, master_bias)
-            ccd = ccdproc.flat_correct(ccd, master_flat)
+                ccd = ccdproc.trim_image(ccd[self.slit1:self.slit2, :])
+            if self.master_bias is not None:
+                ccd = ccdproc.subtract_bias(ccd, self.master_bias)
+                ccd.header['HISTORY'] = "Bias subtracted."
+            else:
+                ccd.header['HISTORY'] = "Bias NOT subtracted."
+                log.warning('No bias subtraction!')
+            ccd = ccdproc.flat_correct(ccd, self.master_flat)
             # OBS: cosmic ray rejection is working pretty well by defining gain = 1. It's not working
             # when we use the real gain of the image. In this case the sky level changes by a factor
             # equal the gain.
@@ -602,11 +657,11 @@ class Main:
                 log.info('Cosmic rays have been cleaned ' + prefix + filename + ' --> ' + 'c' + prefix + filename)
                 print('\n')
                 nccd = np.array(nccd, dtype=np.double) / float(ccd.header['GAIN'])
-                ccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
+                ccd.header['HISTORY'] = "Trimmed. Flat corrected."
                 ccd.header['HISTORY'] = "Cosmic rays rejected."
                 fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
             elif clean is False:
-                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+                ccd.header['HISTORY'] = "Trimmed, Flat corrected."
             ccd.write(prefix + filename, clobber=True)
         log.info('Done: Sci/Std frames have been reduced.')
         print('\n')
@@ -630,7 +685,10 @@ class Main:
         self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
 
         # Create master bias
+        # if len(ic.files_filtered(obstype='BIAS')) > 0:
         self.create_master_bias(ic, self.slit, self.memlim)
+        # else:
+            # log.info('No bias detected')
 
         # Reduce Night Flat frames (if they exist)
         self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
@@ -667,7 +725,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     main = Main()
-    main.run()
+    main()
 
 else:
     print('goodman_ccdreduction.py is not being executed as main.')
