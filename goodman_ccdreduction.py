@@ -72,7 +72,7 @@ from scipy.interpolate import interp1d
 from astropy.coordinates import EarthLocation
 from astropy.time import Time, TimeDelta
 from astroplan import Observer
-from astroplan import get_IERS_A_or_workaround,download_IERS_A
+from astroplan import get_IERS_A_or_workaround, download_IERS_A
 
 import ccdproc
 from ccdproc import ImageFileCollection
@@ -87,7 +87,6 @@ __maintainer__ = "Simon Torres"
 
 
 class Main:
-
     def __init__(self):
 
         # Soar Geodetic Location and other definitions
@@ -108,14 +107,14 @@ class Main:
         self.master_flat_name = None
         self.master_flat_nogrt_name = None
 
-
         # ToDo Check if the file already exist before download it
         # if get_IERS_A_or_workaround() is None:
         #    download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
         # self.memlim = 16E9
-        self.memlim = 1E7
+        # self.memlim = 1E7
+        self.memlim = 6E6
 
         # Taking some args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
@@ -145,7 +144,7 @@ class Main:
         self.clean_path(self.red_path)
 
         # Fixing header and shape of raw data
-        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
+        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h_', overwrite=True)
 
         # Create image file collection for raw data
         ic = ImageFileCollection(self.red_path)
@@ -160,7 +159,8 @@ class Main:
         if len(ic.files_filtered(obstype='BIAS')) > 0:
             self.create_master_bias(ic, self.slit, self.memlim)
         else:
-            log.info('No bias detected')
+            log.info('No BIAS image detected')
+            log.warning('The images will be processed but the results will not be optimal')
 
         # Reduce Night Flat frames (if they exist)
         self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
@@ -260,24 +260,25 @@ class Main:
 
             ccddata, hdr = fits.getdata(_file, header=True, ignore_missing_end=True)
 
-            if not args.red_camera:
-                # 3D to 2D
-                ccddata = ccddata[0]
-                # keywords to remove
-                key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3', 'INSTRUME']
+            # if not args.red_camera:
 
-                # Keyword to be changed (3 --> 2)
-                hdr['N_PARAM'] -= len(key_list_to_remove)
+            # 3D to 2D
+            if ccddata.ndim is 3:
+                ccddata = ccddata[0]
                 hdr['NAXIS'] = 2
 
+            # keywords to remove
+            key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3', 'INSTRUME']
+
+            # Keyword to be changed (3 --> 2)
+            try:
+                hdr['N_PARAM'] -= len(key_list_to_remove)
                 # Specific keywords to be removed
                 for key in key_list_to_remove:
-                    try:
-                        if (key in hdr) is True:
-                            hdr.remove(keyword=key)
-                    except KeyError:
-                        pass
-
+                    if (key in hdr) is True:
+                        hdr.remove(keyword=key)
+            except KeyError as key_error:
+                log.debug(key_error)
 
             # Removing duplicated keywords
             key_list = []
@@ -394,7 +395,7 @@ class Main:
         end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
 
         night_condition = ((Time(df['date-obs'].tolist()).jd < Time(start_night).jd) &
-                         (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
+                           (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
 
         dfobj = df['file'][(df['obstype'] == 'FLAT') & night_condition]
         night_flat_list = dfobj.values.tolist()
@@ -446,7 +447,6 @@ class Main:
 
         dic_all_flats = {}
         for grt in sorted(grt_list):
-
             start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
             end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
 
@@ -475,8 +475,9 @@ class Main:
                 # combinning and trimming slit edges
                 print('Flat list length: %s' % len(flat_list))
                 if len(flat_list) >= 1:
-                    self.master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                                  sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                    self.master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit,
+                                                       sigma_clip=True,
+                                                       sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
                 else:
                     log.info('Flat list empty')
                     return
@@ -509,8 +510,8 @@ class Main:
 
                 # combining and trimming slit edges
                 self.master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit,
-                                                    sigma_clip=True,
-                                                    sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
+                                                         sigma_clip=True,
+                                                         sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
                 if slit is True:
                     self.master_flat_nogrt = ccdproc.trim_image(self.master_flat_nogrt[self.slit1:self.slit2, :])
 
@@ -544,7 +545,7 @@ class Main:
                                            sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
         if slit is True:
             self.master_bias = ccdproc.trim_image(self.master_bias[self.slit1:self.slit2, :])
-        # else:
+            # else:
             # self.master_bias = self.master_bias
         self.master_bias.header['HISTORY'] = "Trimmed."
         self.master_bias.write('master_bias.fits', clobber=True)
@@ -667,39 +668,40 @@ class Main:
         print('\n')
         return
 
-    def run(self):
+        # def run(self):
 
         # cleaning up the reduction dir
-        self.clean_path(self.red_path)
+        # self.clean_path(self.red_path)
 
         # Fixing header and shape of raw data
-        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
+        # self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
 
         # Create image file collection for raw data
-        ic = ImageFileCollection(self.red_path)
+        # ic = ImageFileCollection(self.red_path)
 
         # Getting twilight time
-        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude,
-                                                  self.elevation, self.timezone, self.description)
+        # twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude,
+        #                                           self.elevation, self.timezone, self.description)
         # Create master_flats
-        self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
+        # self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
 
         # Create master bias
         # if len(ic.files_filtered(obstype='BIAS')) > 0:
-        self.create_master_bias(ic, self.slit, self.memlim)
+        # self.create_master_bias(ic, self.slit, self.memlim)
         # else:
-            # log.info('No bias detected')
+        # log.info('No bias detected')
 
         # Reduce Night Flat frames (if they exist)
-        self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
+        # self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
 
         # Reduce Arc frames
-        self.reduce_arc(ic, self.slit, prefix='fz')
+        # self.reduce_arc(ic, self.slit, prefix='fz')
 
         # Reduce Sci frames
-        self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
+        # self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
 
-        return
+        # return
+
 
 if __name__ == '__main__':
 
@@ -719,8 +721,8 @@ if __name__ == '__main__':
     parser.add_argument('red_path', metavar='red_path', type=str, nargs=1,
                         help="Full path to reduced data (e.g /home/jamesbond/soardata/RED/).")
 
-    parser.add_argument('--red-camera', action='store_true', default=False, dest='red_camera',
-                        help='Enables Goodman Red Camera')
+    # parser.add_argument('--red-camera', action='store_true', default=False, dest='red_camera',
+    #                    help='Enables Goodman Red Camera')
 
     args = parser.parse_args()
 
