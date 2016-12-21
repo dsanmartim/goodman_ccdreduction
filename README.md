@@ -19,6 +19,11 @@ from cosmic rays, which are removed by using the modified version of
 the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420) available 
 through the astropy affiliated package ccdproc (and astrocrappy).
 
+For a complete repository with tools for spectroscopy, please see 
+[Simon Torres](https://github.com/simontorres/goodman)'s github 
+repository.
+
+
 ### I/O Data Structure
 
 Although this script was designed to do CCD reduction for any 
@@ -62,10 +67,12 @@ done anymore)
 
 ### Suggestions and Questions
 
-If you have any doubt or question, please contact David Sanmartim 
+If you have any doubt or question, please contact David Sanmartim or Simon 
+Torres, who is the current maintainer:
 
 <b>davidsanm at gmail.com</b>
 <b>dsanmartim at gemini.edu</b>
+<b>storres at ctio.noao.edu</b>
    
 Oct 2016
 
