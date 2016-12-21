@@ -112,9 +112,10 @@ class Main:
         #    download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
+        self.memlim = 6E6
+
         # self.memlim = 16E9
         # self.memlim = 1E7
-        self.memlim = 6E6
 
         # Taking some args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))

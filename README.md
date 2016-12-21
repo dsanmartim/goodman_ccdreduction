@@ -76,3 +76,9 @@ Torres, who is the current maintainer:
    
 Oct 2016
 
+### Notes: By Simon
+
+Install astroplan currently on **heavy development** might requiere a lot
+of maintenance
+
+By installing astroplan, it downgrades numpy
