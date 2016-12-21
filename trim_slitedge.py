@@ -7,6 +7,8 @@ from scipy.interpolate import interp1d
 
 
 def fit_spline3(y, x, order=3, nsum=3):
+
+
     y_resampled = [np.median(y[i:i + nsum]) for i in range(0, len(y) - len(y) % nsum, nsum)]
     x_resampled = np.linspace(0, len(y), len(y_resampled))
 

@@ -1,45 +1,62 @@
 # -*- coding: utf8 -*-
 
 """
-    ## PyGoodman CCD Reduction
+# PyGoodman CCD Reduction - CCD reductions for Goodman spectroscopic data.
 
-    Goodman CCDRed performs ccd reductions for Goodman spectroscopic data.
+This script performs CCD reduction for long-slit spectra taken with the
+Goodman High Throughput Spectrograph at SOAR Telescope. The script will
+make (in order):
 
-    This script performs CCD reduction for spectra taken with the Goodman
-    High Throughput Spectrograph at SOAR Telescope. The script will make
-    (in order):
+- BIAS subtraction
+- TRIMMING including slit edges identification (it does not work for MOS spectroscopy)
+- FLAT correction
+- COSMIC rays rejection (optional)
 
-    - BIAS subtraction
-    - TRIMMING including slit edges identification
-    - FLAT correction
-    - COSMIC rays rejection (optional)
+Users can add a flag in order to clean up science data from cosmic rays, which
+are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420).
 
-    Users can add a flag in order to clean up science data from cosmic rays, which
-    are removed by using the LACosmic code (P. G. van Dokkum, 2001, PASP, 113, 1420)
+## I/O Data Structure
 
-    ### Data Structure
+This script was designed to make CCD reduction for any spectrograph configuration,
+but the input directory should contain only an unique spectral configuration (binning,
+grating, slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the
+following frames:
 
-    Documentations for specific functions of the code can be found directly
-    in the corresponding function. (To be done...)
+- BIAS frames
+- FLAT frames  (Flats taken between science exposures will be trimmed and bias subtracted.)
+- ARC frames   (data from focus sequence will not be reduced)
+- SCIENCE and/or STANDARD frames
 
-    This script was designed to make CCD reduction for any spectral configuration, but
-    the input dir must contains only an unique spectral configuration (binning, grating,
-    slit, gain, rdnoise, CCD ROI, etc). The input dir should contain only the following
-    frames:
+Please, inspect you calibration and throw it out the bad ones. The output data has the same
+filename of the input data, but with a prefix "fzh". It means data has its header updated (h),
+bias subtracted (z) and flat corrected (f). The prefix "c_fzh" means that cosmic ray correction
+was applied.
 
-    - BIAS frames
-    - FLAT frames  (Flats taken between science exposures will be trimmed and bias subtracted.)
-    - ARC frames   (data from focus sequence will not be reduced)
-    - SCIENCE and/or STANDARD frames
+## How to use it...
 
-    # ToDo
+It can be be executed in terminal running:
 
-    - Consider internal illumination correction
+    $ python goodman_ccdreduction.py [options] raw_path red_path
 
-    David Sanmartim (dsanmartim at ctio.noao.edu, dsanmartim at gemini.edu)
-    July 2016
+More information abotu the options and how to use it can be otained by using...
 
-    Thanks to Bruno Quint for all comments and helping.
+    $ python goodman_ccdreduction.py --help
+or
+    $ python goodman_ccdreduction.py -h
+
+Documentation for specific functions of the code can be found directly in the corresponding
+function. (To be done...)
+
+#ToDo
+
+- Consider internal illumination correction (in fact this will not be done)
+- Disable the flat correction if there is a no grating flat
+- Automatically determine the best input parameters for LACOSMIC
+
+David Sanmartim (dsanmartim at gemini.edu)
+August 2016
+
+Thanks to Bruno Quint for all comments and helping.
 
 """
 
@@ -55,7 +72,7 @@ from scipy.interpolate import interp1d
 from astropy.coordinates import EarthLocation
 from astropy.time import Time, TimeDelta
 from astroplan import Observer
-from astroplan import download_IERS_A
+from astroplan import get_IERS_A_or_workaround, download_IERS_A
 
 import ccdproc
 from ccdproc import ImageFileCollection
@@ -66,6 +83,7 @@ __author__ = 'David Sanmartim'
 __date__ = '2016-07-15'
 __version__ = "0.1"
 __email__ = "dsanmartim@ctio.noao.edu"
+__maintainer__ = "Simon Torres"
 
 
 class Main:
@@ -80,16 +98,35 @@ class Main:
         self.timezone = 'UTC'
         self.description = 'Soar Telescope on Cerro Pachon, Chile'
 
-        # ToDo Check if the file already exist befor download it
-        # download_IERS_A(show_progress=True)
+        # Set variables used globally
+        self.master_bias = None
+        self.slit1 = None
+        self.slit2 = None
+        self.master_flat = None
+        self.master_flat_nogrt = None
+        self.master_flat_name = None
+        self.master_flat_nogrt_name = None
+
+        # ToDo Check if the file already exist before download it
+        # if get_IERS_A_or_workaround() is None:
+        #    download_IERS_A(show_progress=True)
 
         # Memory Limit to be used
-        self.memlim = 5E6
+        self.memlim = 6E6
 
-        # Paths
+        # self.memlim = 16E9
+        # self.memlim = 1E7
+
+        # Taking some args from argparse method
         self.raw_path = str(os.path.join(args.raw_path[0], ''))
         self.red_path = str(os.path.join(args.red_path[0], ''))
 
+        if self.raw_path == self.red_path:
+            raise ValueError('raw_path may not be equal to red_path')
+        else:
+            pass
+
+        # More args from argparse
         self.clean = args.clean
         self.slit = args.slit
 
@@ -102,8 +139,59 @@ class Main:
         warnings.filterwarnings('ignore')
         log.propagate = False
 
+    def __call__(self, *args, **kwargs):
+
+        # cleaning up the reduction dir
+        self.clean_path(self.red_path)
+
+        # Fixing header and shape of raw data
+        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h_', overwrite=True)
+
+        # Create image file collection for raw data
+        ic = ImageFileCollection(self.red_path)
+
+        # Getting twilight time
+        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude,
+                                                  self.elevation, self.timezone, self.description)
+        # Create master_flats
+        self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
+
+        # Create master bias
+        if len(ic.files_filtered(obstype='BIAS')) > 0:
+            self.create_master_bias(ic, self.slit, self.memlim)
+        else:
+            log.info('No BIAS image detected')
+            log.warning('The images will be processed but the results will not be optimal')
+
+        # Reduce Night Flat frames (if they exist)
+        self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
+
+        # Reduce Arc frames
+        self.reduce_arc(ic, self.slit, prefix='fz')
+
+        # Reduce Sci frames
+        self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
+
+        return
+
     @staticmethod
     def fit_spline3(y, order=3, nsum=5):
+        """Fit a cubib spline to an 1D-array of N pixels.
+
+        Args:
+            y (1D array like): A 1-D array of monotonically increasing real values
+            order (int) : order of t
+            nsum (ins)  : number of array elements to be avareged
+
+        Returns: It returns a function
+
+        Examples:
+
+        f = fit_spline3(y, order=5, nsum=2)
+        x = np.arange(0,1500,1)
+        ysmooth = f(x)
+
+        """
         y_resampled = [np.median(y[i:i + nsum]) for i in range(0, len(y) - len(y) % nsum, nsum)]
         x_resampled = np.linspace(0, len(y), len(y_resampled))
 
@@ -116,6 +204,16 @@ class Main:
     # Local Minima and Maxima
     @staticmethod
     def local_minmax(data, nmin=1, nmax=1):
+        """Find local minima-maxima points for a set of non-noisy data
+
+        Args:
+            data (1D array like): 1D array of non-noisy data
+            nmin (int): number of local minina to be find
+            nmax (int): number of local maxima to be find
+
+        Returns: It returns a function
+
+        """
 
         # Identifying indices of local minima-maxima points
         id_min = (np.gradient(np.sign(np.gradient(data))) > 0).nonzero()[0]  # index of local min
@@ -136,7 +234,7 @@ class Main:
     @staticmethod
     def clean_path(path):
         """
-        Clean up directoy.
+        Clean up FIST file in a directoy. It's not recursive
         """
         if os.path.exists(path):
             for _file in glob.glob(os.path.join(path, '*.fits')):
@@ -144,30 +242,44 @@ class Main:
 
     @staticmethod
     def fix_header_and_shape(input_path, output_path, prefix, overwrite=False):
-        """
-        Remove/Update some  inconvenient parameters in the header of the Goodman FITS
+
+        """Remove/Update some  inconvenient parameters in the header of the Goodman FITS
         files. Some of these parameters contain non-printable ASCII characters. The ouptut
         files are created in the output_path. Also convert fits from 3D [1,X,Y] to 2D [X,Y].
+
+        Args:
+            input_path (str): Location of input data.
+            output_path (str): Location of output data.
+            prefix (str): Prefix to be added in the filename of output data
+            overwrite (bool, optional): If true it it overwrite existing data
+
+        Returns:
+            Fits file with header and shape fixed.
         """
+
         for _file in sorted(glob.glob(os.path.join(input_path, '*.fits'))):
 
             ccddata, hdr = fits.getdata(_file, header=True, ignore_missing_end=True)
+
+            # if not args.red_camera:
+
             # 3D to 2D
-            ccddata = ccddata[0]
+            if ccddata.ndim is 3:
+                ccddata = ccddata[0]
+                hdr['NAXIS'] = 2
+
             # keywords to remove
             key_list_to_remove = ['PARAM0', 'PARAM61', 'PARAM62', 'PARAM63', 'NAXIS3', 'INSTRUME']
 
             # Keyword to be changed (3 --> 2)
-            hdr['N_PARAM'] -= len(key_list_to_remove)
-            hdr['NAXIS'] = 2
-
-            # Specific keywords to be removed
-            for key in key_list_to_remove:
-                try:
+            try:
+                hdr['N_PARAM'] -= len(key_list_to_remove)
+                # Specific keywords to be removed
+                for key in key_list_to_remove:
                     if (key in hdr) is True:
                         hdr.remove(keyword=key)
-                except KeyError:
-                    pass
+            except KeyError as key_error:
+                log.debug(key_error)
 
             # Removing duplicated keywords
             key_list = []
@@ -186,11 +298,21 @@ class Main:
         return
 
     def find_slitedge(self, ccddata):
+        """Find slit edge by inspecting signal variation in the spatial direction
+        of flat frames. The spatial direction is assumed to be axis=0 (or y axis
+        in IRAF convention) and data are divided in two regions in which we are
+        looking for slit edges.
 
+        Args:
+            ccddata (ccdproc.CCDData): The actual data contained in this ccdproc.CCDData object
+
+        Returns (int):
+            Pixel of slit edge 1 and slit edge 2 (bottom to top of the flat image).
+        """
         # Reading and Collapsing flat in the dispersion direction
         flat_collapsed = np.sum(ccddata, axis=1) / ccddata.shape[1]
 
-        # Excluding first pixels in the spatial direction
+        # Excluding 3 first pixels in the spatial direction
         cut = 3
         c_flat = flat_collapsed[cut:-cut]
         c_lines = np.arange(0, c_flat.size, 1)
@@ -217,8 +339,21 @@ class Main:
 
     @staticmethod
     def get_twilight_time(image_collection, observatory, longitude, latitude, elevation, timezone, description):
-
         """
+
+        Args:
+            image_collection:
+            observatory:
+            longitude:
+            latitude:
+            elevation:
+            timezone:
+            description:
+
+        Returns:
+
+        Old...
+
         image_collection: ccdproc object
         observatory: str, observatory name (e.g. 'Soar Telescope',
         long: str, dms or deg
@@ -244,13 +379,24 @@ class Main:
     @staticmethod
     def get_night_flats(image_collection, twilight_evening, twilight_morning):
 
+        """
+
+        Args:
+            image_collection:
+            twilight_evening:
+            twilight_morning:
+
+        Returns:
+
+        """
+
         df = image_collection.summary.to_pandas()
 
         start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
         end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
 
         night_condition = ((Time(df['date-obs'].tolist()).jd < Time(start_night).jd) &
-                         (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
+                           (Time(df['date-obs'].tolist()).jd > Time(end_night).jd))
 
         dfobj = df['file'][(df['obstype'] == 'FLAT') & night_condition]
         night_flat_list = dfobj.values.tolist()
@@ -277,13 +423,21 @@ class Main:
         return dayflat_list
 
     def create_daymaster_flat(self, image_collection, twilight_evening, twilight_morning, slit, memory_limit):
+        """
 
-        global slit1, slit2, \
-            master_flat, master_flat_nogrt, \
-            master_flat_name, master_flat_nogrt_name
+        Args:
+            image_collection:
+            twilight_evening:
+            twilight_morning:
+            slit:
+            memory_limit:
 
-        master_flat = []
-        master_flat_nogrt = []
+        Returns:
+
+        """
+
+        self.master_flat = []
+        self.master_flat_nogrt = []
 
         # Creating dict. of flats. The key values are expected to be: GRATIN_ID and '<NO GRATING>'
         # if there is flat taken w/o grating
@@ -294,7 +448,6 @@ class Main:
 
         dic_all_flats = {}
         for grt in sorted(grt_list):
-
             start_night = (Time(twilight_evening) - TimeDelta(1800.0, format='sec')).isot
             end_night = (Time(twilight_morning) + TimeDelta(1800.0, format='sec')).isot
 
@@ -304,7 +457,7 @@ class Main:
             dfobj = df['file'][(df['obstype'] == 'FLAT') & (df['grating'] == grt) & day_condition]
             dic_all_flats[str(grt)] = dfobj.tolist()
 
-        # Dict. for flats with grating and without gratintg
+        # Dict. for flats with grating and without grating
         dic_flat = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt != "<NO GRATING>"}
         dic_flatnogrt = {grt: dic_all_flats[grt] for grt in dic_all_flats if grt == "<NO GRATING>"}
 
@@ -321,15 +474,21 @@ class Main:
                     flat_list.append(ccd)
 
                 # combinning and trimming slit edges
-                master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                              sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                print('Flat list length: %s' % len(flat_list))
+                if len(flat_list) >= 1:
+                    self.master_flat = ccdproc.combine(flat_list, method='median', mem_limit=memory_limit,
+                                                       sigma_clip=True,
+                                                       sigma_clip_low_thresh=1.0, sigma_clip_high_thresh=1.0)
+                else:
+                    log.info('Flat list empty')
+                    return
                 if slit is True:
                     print('\n Finding slit edges... \n')
-                    slit1, slit2 = self.find_slitedge(master_flat)
-                    master_flat = ccdproc.trim_image(master_flat[slit1:slit2, :])
+                    self.slit1, self.slit2 = self.find_slitedge(self.master_flat)
+                    self.master_flat = ccdproc.trim_image(self.master_flat[self.slit1:self.slit2, :])
 
-                master_flat_name = 'master_flat_' + grt[5:] + '.fits'
-                master_flat.write(master_flat_name, clobber=True)
+                self.master_flat_name = 'master_flat_' + grt[5:] + '.fits'
+                self.master_flat.write(self.master_flat_name, clobber=True)
 
                 log.info('Done: master flat has been created --> ' + 'master_flat_' + grt[5:] + '.fits')
                 print('\n')
@@ -351,14 +510,14 @@ class Main:
                     flatnogrt_list.append(ccd)
 
                 # combining and trimming slit edges
-                master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit,
-                                                    sigma_clip=True,
-                                                    sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
+                self.master_flat_nogrt = ccdproc.combine(flatnogrt_list, method='median', mem_limit=memory_limit,
+                                                         sigma_clip=True,
+                                                         sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
                 if slit is True:
-                    master_flat_nogrt = ccdproc.trim_image(master_flat_nogrt[slit1:slit2, :])
+                    self.master_flat_nogrt = ccdproc.trim_image(self.master_flat_nogrt[self.slit1:self.slit2, :])
 
-                master_flat_nogrt_name = 'master_flat_nogrt.fits'
-                master_flat_nogrt.write(master_flat_nogrt_name, clobber=True)
+                self.master_flat_nogrt_name = 'master_flat_nogrt.fits'
+                self.master_flat_nogrt.write(self.master_flat_nogrt_name, clobber=True)
 
                 log.info('Done: master flat (taken without grating) have been created --> master_flat_nogrt.fits')
                 print('\n')
@@ -368,10 +527,8 @@ class Main:
 
         return
 
-    @staticmethod
-    def create_master_bias(image_collection, slit, memory_limit):
+    def create_master_bias(self, image_collection, slit, memory_limit):
 
-        global master_bias
         bias_list = []
         log.info('Combining and trimming bias frames:')
         for filename in image_collection.files_filtered(obstype='BIAS'):
@@ -385,38 +542,35 @@ class Main:
 
             bias_list.append(ccd)
 
-        master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memory_limit, sigma_clip=True,
-                                      sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
+        self.master_bias = ccdproc.combine(bias_list, method='median', mem_limit=memory_limit, sigma_clip=True,
+                                           sigma_clip_low_thresh=3.0, sigma_clip_high_thresh=3.0)
         if slit is True:
-            master_bias = ccdproc.trim_image(master_bias[slit1:slit2, :])
-        else:
-            master_bias = master_bias
-        master_bias.header['HISTORY'] = "Trimmed."
-        master_bias.write('master_bias.fits', clobber=True)
+            self.master_bias = ccdproc.trim_image(self.master_bias[self.slit1:self.slit2, :])
+            # else:
+            # self.master_bias = self.master_bias
+        self.master_bias.header['HISTORY'] = "Trimmed."
+        self.master_bias.write('master_bias.fits', clobber=True)
 
         # Now I obtained bias... subtracting bias from master flat
         # Testing if master_flats are not empty arrays
-        if (not master_flat) is False:
-            fccd = ccdproc.subtract_bias(master_flat, master_bias)
+        if (not self.master_flat) is False:
+            fccd = ccdproc.subtract_bias(self.master_flat, self.master_bias)
             fccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
-            fccd.write(master_flat_name, clobber=True)
+            fccd.write(self.master_flat_name, clobber=True)
 
-        if (not master_flat_nogrt) is False:
-            ngccd = ccdproc.subtract_bias(master_flat_nogrt, master_bias)
+        if (not self.master_flat_nogrt) is False:
+            ngccd = ccdproc.subtract_bias(self.master_flat_nogrt, self.master_bias)
             ngccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
-            ngccd.write(master_flat_nogrt_name, clobber=True)
+            ngccd.write(self.master_flat_nogrt_name, clobber=True)
 
         log.info('Done: a master bias have been created --> master_bias.fits')
         print('\n')
         return
 
-    @staticmethod
-    def reduce_nightflats(image_collection, twilight_evening, twilight_morning, slit, prefix):
-
-        # 40 min = time before twilight evening to be considered as begining of the night
-        # time_before = (Time(twilight_evening) - TimeDelta(2400.0, format='sec')).isot
+    def reduce_nightflats(self, image_collection, twilight_evening, twilight_morning, slit, prefix):
 
         log.info('Reducing flat frames taken during the night...')
+
         df = image_collection.summary.to_pandas()
 
         # Night starts/ends 30min beforre/after twilight evening/morning
@@ -434,17 +588,21 @@ class Main:
                 log.info('Trimming and bias subtracting frame ' + filename + ' --> ' + prefix + filename)
                 ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                 ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
+                ccd.header['HISTORY'] = "Trimmed"
                 if slit is True:
-                    ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-                ccd = ccdproc.subtract_bias(ccd, master_bias)
-                ccd.header['HISTORY'] = "Trimmed. Bias subtracted."
+                    ccd = ccdproc.trim_image(ccd[self.slit1:self.slit2, :])
+                if self.master_bias is not None:
+                    ccd = ccdproc.subtract_bias(ccd, self.master_bias)
+                    ccd.header['HISTORY'] = "Bias subtracted."
+                else:
+                    ccd.header['HISTORY'] = "Bias NOT subtracted."
+                    log.warning('No bias subtraction!')
                 ccd.write(prefix + filename, clobber=True)
             log.info('Done --> Night flat frames have been reduced.')
             print('\n')
         return
 
-    @staticmethod
-    def reduce_arc(image_collection, slit, prefix):
+    def reduce_arc(self, image_collection, slit, prefix):
 
         log.info('Reducing Arc frames...')
 
@@ -456,17 +614,21 @@ class Main:
                 ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
                 ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
                 if slit is True:
-                    ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-                ccd = ccdproc.subtract_bias(ccd, master_bias)
-                ccd = ccdproc.flat_correct(ccd, master_flat)
-                ccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
+                    ccd = ccdproc.trim_image(ccd[self.slit1:self.slit2, :])
+                if self.master_bias is not None:
+                    ccd = ccdproc.subtract_bias(ccd, self.master_bias)
+                    ccd.header['HISTORY'] = "Bias subtracted."
+                else:
+                    ccd.header['HISTORY'] = "Bias NOT subtracted."
+                    log.warning('No bias subtraction!')
+                ccd = ccdproc.flat_correct(ccd, self.master_flat)
+                ccd.header['HISTORY'] = "Trimmed. Flat corrected."
                 ccd.write(prefix + filename, clobber=True)
             log.info('Done --> Arc frames have been reduced.')
             print('\n')
         return
 
-    @staticmethod
-    def reduce_sci(image_collection, slit, clean, prefix):
+    def reduce_sci(self, image_collection, slit, clean, prefix):
 
         log.info('Reducing Sci/Std frames...')
         for filename in image_collection.files_filtered(obstype='OBJECT'):
@@ -474,9 +636,14 @@ class Main:
             ccd = CCDData.read(os.path.join(image_collection.location, '') + filename, unit=u.adu)
             ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['TRIMSEC'])
             if slit is True:
-                ccd = ccdproc.trim_image(ccd[slit1:slit2, :])
-            ccd = ccdproc.subtract_bias(ccd, master_bias)
-            ccd = ccdproc.flat_correct(ccd, master_flat)
+                ccd = ccdproc.trim_image(ccd[self.slit1:self.slit2, :])
+            if self.master_bias is not None:
+                ccd = ccdproc.subtract_bias(ccd, self.master_bias)
+                ccd.header['HISTORY'] = "Bias subtracted."
+            else:
+                ccd.header['HISTORY'] = "Bias NOT subtracted."
+                log.warning('No bias subtraction!')
+            ccd = ccdproc.flat_correct(ccd, self.master_flat)
             # OBS: cosmic ray rejection is working pretty well by defining gain = 1. It's not working
             # when we use the real gain of the image. In this case the sky level changes by a factor
             # equal the gain.
@@ -492,52 +659,56 @@ class Main:
                 log.info('Cosmic rays have been cleaned ' + prefix + filename + ' --> ' + 'c' + prefix + filename)
                 print('\n')
                 nccd = np.array(nccd, dtype=np.double) / float(ccd.header['GAIN'])
-                ccd.header['HISTORY'] = "Trimmed. Bias subtracted. Flat corrected."
+                ccd.header['HISTORY'] = "Trimmed. Flat corrected."
                 ccd.header['HISTORY'] = "Cosmic rays rejected."
                 fits.writeto('c' + prefix + filename, nccd, ccd.header, clobber=True)
             elif clean is False:
-                ccd.header['HISTORY'] = "Trimmed, Bias subtracted, Flat corrected."
+                ccd.header['HISTORY'] = "Trimmed, Flat corrected."
             ccd.write(prefix + filename, clobber=True)
         log.info('Done: Sci/Std frames have been reduced.')
         print('\n')
         return
 
-    def run(self):
+        # def run(self):
 
         # cleaning up the reduction dir
-        self.clean_path(self.red_path)
+        # self.clean_path(self.red_path)
 
         # Fixing header and shape of raw data
-        self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
+        # self.fix_header_and_shape(self.raw_path, self.red_path, prefix='h.', overwrite=True)
 
         # Create image file collection for raw data
-        ic = ImageFileCollection(self.red_path)
+        # ic = ImageFileCollection(self.red_path)
 
         # Getting twilight time
-        twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude, self.elevation,
-                                                  self.timezone, self.description)
+        # twi_eve, twi_mor = self.get_twilight_time(ic, self.observatory, self.longitude, self.latitude,
+        #                                           self.elevation, self.timezone, self.description)
         # Create master_flats
-        self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
+        # self.create_daymaster_flat(ic, twi_eve, twi_mor, self.slit, self.memlim)
 
         # Create master bias
-        self.create_master_bias(ic, self.slit, self.memlim)
+        # if len(ic.files_filtered(obstype='BIAS')) > 0:
+        # self.create_master_bias(ic, self.slit, self.memlim)
+        # else:
+        # log.info('No bias detected')
 
         # Reduce Night Flat frames (if they exist)
-        self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
+        # self.reduce_nightflats(ic, twi_eve, twi_mor, self.slit, prefix='z')
 
         # Reduce Arc frames
-        self.reduce_arc(ic, self.slit, prefix='fz')
+        # self.reduce_arc(ic, self.slit, prefix='fz')
 
         # Reduce Sci frames
-        self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
+        # self.reduce_sci(ic, self.slit, self.clean, prefix='fz')
 
-        return
+        # return
 
 
 if __name__ == '__main__':
 
     # Parsing Arguments ---
-    parser = argparse.ArgumentParser(description="Goodman - CCD Data Reduction.")
+    parser = argparse.ArgumentParser(description="PyGoodman CCD Reduction - CCD reductions for "
+                                                 "Goodman spectroscopic data")
 
     parser.add_argument('-c', '--clean', action='store_true',
                         help="Clean cosmic rays from science data.")
@@ -551,10 +722,13 @@ if __name__ == '__main__':
     parser.add_argument('red_path', metavar='red_path', type=str, nargs=1,
                         help="Full path to reduced data (e.g /home/jamesbond/soardata/RED/).")
 
+    # parser.add_argument('--red-camera', action='store_true', default=False, dest='red_camera',
+    #                    help='Enables Goodman Red Camera')
+
     args = parser.parse_args()
 
     main = Main()
-    main.run()
+    main()
 
 else:
     print('goodman_ccdreduction.py is not being executed as main.')
